@@ -9,6 +9,7 @@ extern "C" {
 }
 
 #include "filesystem.h"
+#include "webserver.h"
 
 static void ICACHE_FLASH_ATTR configure_mdns()
 {
@@ -131,17 +132,17 @@ static void ICACHE_FLASH_ATTR webserver_send_response(espconn*    conn,
                                                       char*       buf,
                                                       const char* mime_type,
                                                       int         head_room,
-                                                      int         data_size)
+                                                      int         payload_size)
 {
     os_sprintf(buf, "HTTP/1.1 200 OK\nContent-Type: %s\nContent-Length: %d\n\n",
-               mime_type, data_size);
+               mime_type, payload_size);
 
     const int head_size = os_strlen(buf);
     char*     out       = buf + head_room - head_size;
 
     os_memmove(out, buf, head_size);
 
-    espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + data_size);
+    espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + payload_size);
 }
 
 static void ICACHE_FLASH_ATTR webserver_send_error(espconn* conn,
@@ -177,15 +178,15 @@ static void ICACHE_FLASH_ATTR webserver_send_error(espconn* conn,
     espconn_send(conn, reinterpret_cast<uint8_t*>(buf), os_strlen(buf));
 }
 
-static const char* ICACHE_FLASH_ATTR get_mime_type(const char* path, int len)
+static const char* ICACHE_FLASH_ATTR get_mime_type(const char* uri, int len)
 {
-    struct entry {
+    struct mime_entry {
         char        ext[5];
         signed char len;
         const char* mime_type;
     };
 
-    static const entry mime_types[] = {
+    static const mime_entry mime_types[] = {
         { "html", 4, "text/html"       },
         { "css",  3, "text/css"        },
         { "js",   2, "text/javascript" }
@@ -195,14 +196,55 @@ static const char* ICACHE_FLASH_ATTR get_mime_type(const char* path, int len)
         if (len <= e.len)
             continue;
 
-        if (path[len - e.len - 1] != '.')
+        if (uri[len - e.len - 1] != '.')
             continue;
 
-        if (os_memcmp(&path[len - e.len], e.ext, e.len) == 0)
+        if (os_memcmp(&uri[len - e.len], e.ext, e.len) == 0)
             return e.mime_type;
     }
 
     return nullptr;
+}
+
+static const handler_entry* request_handlers     = nullptr;
+static const handler_entry* request_handlers_end = nullptr;
+
+static int ICACHE_FLASH_ATTR handle_request(request_type      method,
+                                            const text_entry& uri,
+                                            const text_entry& query,
+                                            const text_entry& headers_and_payload)
+{
+    for (auto h = request_handlers; h != request_handlers_end; h++) {
+
+        if (h->method == method && os_strcmp(uri.text, h->uri) == 0) {
+
+            text_entry headers = headers_and_payload;
+            text_entry payload = { };
+
+            for (int i = 1; i < headers.len; i++) {
+
+                const char c = headers.text[i];
+
+                // Two consecutive CRLF sequences signify the end of headers
+                if (c == '\r' && headers.text[i - 1] == '\n') {
+
+                    // skip LF which should be right after CR
+                    const int payload_offs = (i + 1 < headers.len) ? 2 : 1;
+
+                    payload.text = &headers.text[i + payload_offs];
+                    payload.len  = headers.len - i - payload_offs;
+
+                    headers.len     = i;
+                    headers.text[i] = 0;
+                    break;
+                }
+            }
+
+            return h->handler(query, headers, payload);
+        }
+    }
+
+    return 404;
 }
 
 static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned short length)
@@ -212,22 +254,20 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
     print_conn_info(conn, "receive", static_cast<int>(length));
 
     //========================================================================
-    // Extract method, path, HTTP version and headers
+    // Extract method, URI, HTTP version and headers
     //========================================================================
-
-    struct entry {
-        char* text;
-        int   len;
-    };
 
     enum state {
         method,
-        path,
+        uri,
         version,
-        headers
+        headers,
+        query,
+
+        num_states
     };
 
-    entry e[4] = {};
+    text_entry e[num_states] = {};
     e[method].text = pusrdata;
 
     int s = method;
@@ -251,12 +291,53 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
         else if (c == '\n') {
 
             if (s == version) {
-                pusrdata[i] = 0;
-                e[s].len = pusrdata + i - e[s].text;
+                pusrdata[i - 1] = 0; // overwrite CR with 0
+                e[s].len = pusrdata + i - 1 - e[s].text;
             }
 
             e[headers].text = pusrdata + i + 1;
+            e[headers].len  = length - i - 1;
             break;
+        }
+    }
+
+    //========================================================================
+    // Separate arguments from URI
+    //========================================================================
+
+    for (int i = 0; i < e[uri].len; i++) {
+        if (e[uri].text[i] == '?') {
+            e[query].text  = &e[uri].text[i + 1];
+            e[query].len   = length - i - 1;
+            e[uri].text[i] = 0;
+            e[uri].len     = i;
+            break;
+        }
+    }
+
+    //========================================================================
+    // Fix up the URI
+    //========================================================================
+
+    // For root URI, use index.html
+    if (e[uri].len == 1 && e[uri].text[0] == '/') {
+
+        static const char index_html[] = "index.html";
+        e[uri].text = const_cast<char*>(&index_html[0]);
+        e[uri].len  = sizeof(index_html) - 1;
+    }
+    else {
+        // Skip leading slash
+        if (e[uri].text[0] == '/') {
+            ++e[uri].text;
+            --e[uri].len;
+        }
+
+        // To lowercase
+        for (int i = 0; i < e[uri].len; i++) {
+            const char c = e[uri].text[i];
+            if (c >= 'A' && c <= 'Z')
+                e[uri].text[i] = c + 0x20;
         }
     }
 
@@ -264,59 +345,56 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
     // Process GET request
     //========================================================================
 
-    if (e[method].len == 3 && os_memcmp(e[method].text, "GET", 3) == 0 && e[path].len) {
+    if (e[method].len == 3 && os_memcmp(e[method].text, "GET", 3) == 0 && e[uri].len) {
 
-        // For root path, use index.html
-        if (e[path].len == 1 && e[path].text[0] == '/') {
+        const int err = handle_request(GET_METHOD, e[uri], e[query], e[headers]);
 
-            static const char index_html[] = "index.html";
-            e[path].text = const_cast<char*>(&index_html[0]);
-            e[path].len  = sizeof(index_html) - 1;
-        }
-        else {
-            // Skip leading slash
-            if (e[path].text[0] == '/') {
-                ++e[path].text;
-                --e[path].len;
+        if (err == 404)  {
+
+            // Serve a static file
+            // -------------------
+
+            constexpr int head_room = 64;
+            auto fentry = find_file(e[uri].text);
+
+            if (!fentry)
+                os_printf("Error: file '%s' not found\n", e[uri].text);
+
+            const char* mime_type = nullptr;
+            if (fentry) {
+                mime_type = get_mime_type(e[uri].text, e[uri].len);
+
+                if (!mime_type)
+                    os_printf("Error: cannot detect MIME type for '%s'\n",
+                              e[uri].text);
             }
 
-            // To lowercase
-            for (int i = 0; i < e[path].len; i++) {
-                const char c = e[path].text[i];
-                if (c >= 'A' && c <= 'Z')
-                    e[path].text[i] = c + 0x20;
+            char* file = nullptr;
+            if (mime_type)
+                file = load_file(fentry, head_room);
+
+            if (file) {
+                webserver_send_response(conn, file, mime_type, head_room, fentry->size);
+
+                os_free(file);
             }
+            else
+                webserver_send_error(conn, 404);
         }
+        else if (err != 200)
+            webserver_send_error(conn, err);
+    }
 
-        // Serve a static file
-        // -------------------
+    //========================================================================
+    // Process POST request
+    //========================================================================
 
-        constexpr int head_room = 64;
-        auto fentry = find_file(e[path].text);
+    else if (e[method].len == 4 && os_memcmp(e[method].text, "POST", 4) == 0 && e[uri].len) {
 
-        if (!fentry)
-            os_printf("Error: file '%s' not found\n", e[path].text);
+        const int err = handle_request(POST_METHOD, e[uri], e[query], e[headers]);
 
-        const char* mime_type = nullptr;
-        if (fentry) {
-            mime_type = get_mime_type(e[path].text, e[path].len);
-
-            if (!mime_type)
-                os_printf("Error: cannot detect MIME type for '%s'\n",
-                          e[path].text);
-        }
-
-        char* file = nullptr;
-        if (mime_type)
-            file = load_file(fentry, head_room);
-
-        if (file) {
-            webserver_send_response(conn, file, mime_type, head_room, fentry->size);
-
-            os_free(file);
-        }
-        else
-            webserver_send_error(conn, 404);
+        if (err != 200)
+            webserver_send_error(conn, err);
     }
 
     //========================================================================
@@ -350,8 +428,12 @@ static void ICACHE_FLASH_ATTR webserver_listen(void* arg)
     espconn_regist_disconcb(conn, webserver_disconnect);
 }
 
-void ICACHE_FLASH_ATTR configure_webserver()
+void ICACHE_FLASH_ATTR configure_webserver(const handler_entry* user_request_handlers,
+                                           unsigned             num_user_handlers)
 {
+    request_handlers     = user_request_handlers;
+    request_handlers_end = user_request_handlers + num_user_handlers;
+
     configure_wifi();
 
     configure_mdns();

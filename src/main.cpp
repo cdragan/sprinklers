@@ -9,11 +9,34 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
+static int ICACHE_FLASH_ATTR update(const text_entry& query,
+                                    const text_entry& headers,
+                                    const text_entry& payload)
+{
+    os_printf("==== QUERY ====\n");
+    os_printf("%s", query.text);
+    os_printf("\n==== HEADERS ====\n");
+    os_printf("%s", headers.text);
+    os_printf("\n==== DATA ====\n");
+    for (int i = 0; i < payload.len; i++) {
+        if (i >= 64) break;
+        if (i == 0) os_printf(" ");
+        os_printf("%02x", payload.text[i]);
+    }
+    if (payload.len)
+        os_printf("\n");
+    return 500;
+}
+
+static const handler_entry web_handlers[] = {
+    { POST_METHOD, "update", update }
+};
+
 extern "C" void ICACHE_FLASH_ATTR user_init()
 {
     init_filesystem();
 
-    configure_webserver();
+    configure_webserver(&web_handlers[0], sizeof(web_handlers) / sizeof(web_handlers[0]));
 
     static os_timer_t timer;
     os_timer_disarm(&timer);

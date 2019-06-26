@@ -12,54 +12,63 @@ extern "C" {
 static uint32_t flash_size_b = 0;
 static uint32_t data_begin   = 0;
 static uint32_t data_end     = 0;
+static bool     supports_ota = false;
 
 static void ICACHE_FLASH_ATTR configure_flash()
 {
-    switch (system_get_flash_size_map()) {
+    // Note: On some boards there isn't enough flash to store user data, so instead
+    // we use the second partition (user2) for storing data instead of supporting OTA.
 
-        case FLASH_SIZE_2M:
-            flash_size_b = 256u * 1024u;
-            break;
+    switch (system_get_flash_size_map()) {
 
         case FLASH_SIZE_4M_MAP_256_256:
             flash_size_b = 512u * 1024u;
+            data_begin   = 256u * 1024u;
             break;
 
         case FLASH_SIZE_8M_MAP_512_512:
             flash_size_b = 1024u * 1024u;
+            data_begin   = 512u * 1024u;
             break;
 
         case FLASH_SIZE_16M_MAP_512_512:
             flash_size_b = 2u * 1024u * 1024u;
             data_begin   = 1024u * 1024u;
+            supports_ota = true;
             break;
 
         case FLASH_SIZE_16M_MAP_1024_1024:
             flash_size_b = 2u * 1024u * 1024u;
+            data_begin   = 1024u * 1024u;
             break;
 
         case FLASH_SIZE_32M_MAP_512_512:
             flash_size_b = 4u * 1024u * 1024u;
             data_begin   = 1024u * 1024u;
+            supports_ota = true;
             break;
 
         case FLASH_SIZE_32M_MAP_1024_1024:
             flash_size_b = 4u * 1024u * 1024u;
             data_begin   = 2u * 1024u * 1024u;
+            supports_ota = true;
             break;
 
         case FLASH_SIZE_32M_MAP_2048_2048:
             flash_size_b = 4u * 1024u * 1024u;
+            data_begin   = 2u * 1024u * 1024u;
             break;
 
         case FLASH_SIZE_64M_MAP_1024_1024:
             flash_size_b = 8u * 1024u * 1024u;
             data_begin   = 2u * 1024u * 1024u;
+            supports_ota = true;
             break;
 
         case FLASH_SIZE_128M_MAP_1024_1024:
             flash_size_b = 16u * 1024u * 1024u;
             data_begin   = 2u * 1024u * 1024u;
+            supports_ota = true;
             break;
 
         default:
