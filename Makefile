@@ -15,4 +15,12 @@ upload_and_monitor: upload
 fs.bin:
 	python tools/mkfs.py www $@
 
+upload_fs: fs.bin
+ifdef ip
+	curl --data-binary @fs.bin --header "Content-Type: application/octet-stream" http://$(ip)/upload_fs
+else
+	@echo "ip not specified!!! Usage: make upload_fs ip=sprinklers.local"
+	@false
+endif
+
 .PHONY: build upload monitor upload_and_monitor

@@ -381,7 +381,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
             else
                 webserver_send_error(conn, 404);
         }
-        else if (err != 200)
+        else if (err)
             webserver_send_error(conn, err);
     }
 
@@ -393,7 +393,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
         const int err = handle_request(POST_METHOD, e[uri], e[query], e[headers]);
 
-        if (err != 200)
+        if (err)
             webserver_send_error(conn, err);
     }
 
