@@ -88,35 +88,37 @@ static void ICACHE_FLASH_ATTR configure_flash()
 extern "C" uint32_t ICACHE_FLASH_ATTR user_rf_cal_sector_set()
 {
     configure_flash();
-    return data_end >> 12;
+    return data_end / SPI_FLASH_SEC_SIZE;
 }
 
 static uint32_t ICACHE_FLASH_ATTR calc_checksum(const uint32_t* begin, const uint32_t* end)
 {
     uint32_t checksum = 0;
-    while (begin < end)
-        checksum -= *(begin++);
+    while (begin < end) {
+        const int value = *(begin++);
+        checksum -= value;
+    }
     return checksum;
 }
 
 static filesystem* fs = nullptr;
 
-void ICACHE_FLASH_ATTR init_filesystem()
+int ICACHE_FLASH_ATTR init_filesystem()
 {
     if (fs)
-        return;
+        return 0;
 
     filesystem hdr;
     if (spi_flash_read(data_begin, reinterpret_cast<uint32_t*>(&hdr), sizeof(hdr))
             != SPI_FLASH_RESULT_OK) {
         os_printf("Error: failed to read filesystem header\n");
-        return;
+        return 1;
     }
 
     if (hdr.magic != FILESYSTEM_MAGIC) {
         os_printf("Error: filesystem magic is 0x%08x, but should be 0x%08x\n",
                   hdr.magic, FILESYSTEM_MAGIC);
-        return;
+        return 1;
     }
 
     constexpr uint32_t max_files = 1 + (SPI_FLASH_SEC_SIZE - sizeof(hdr)) / sizeof(file_entry);
@@ -124,7 +126,7 @@ void ICACHE_FLASH_ATTR init_filesystem()
     if (hdr.num_files == 0 || hdr.num_files > max_files) {
         os_printf("Error: incorrect number of files: %u (must be from 1 to %u)\n",
                   hdr.num_files, max_files);
-        return;
+        return 1;
     }
 
     const uint32_t fs_size = sizeof(filesystem) + sizeof(file_entry) * (hdr.num_files - 1);
@@ -133,7 +135,7 @@ void ICACHE_FLASH_ATTR init_filesystem()
 
     if (!fs) {
         os_printf("Error: failed to allocate memory\n");
-        return;
+        return 1;
     }
 
     if (spi_flash_read(data_begin, reinterpret_cast<uint32_t*>(fs), fs_size)
@@ -141,7 +143,7 @@ void ICACHE_FLASH_ATTR init_filesystem()
         os_printf("Error: failed to read filesystem\n");
         os_free(fs);
         fs = nullptr;
-        return;
+        return 1;
     }
 
     const uint32_t* src = &fs->num_files; // skip magic and checksum
@@ -153,7 +155,11 @@ void ICACHE_FLASH_ATTR init_filesystem()
                   checksum, hdr.checksum);
         os_free(fs);
         fs = nullptr;
+        return 1;
     }
+
+    os_printf("initialized filesystem: %u files\n", hdr.num_files);
+    return 0;
 }
 
 const file_entry* ICACHE_FLASH_ATTR find_file(const char* filename)
@@ -172,8 +178,7 @@ const file_entry* ICACHE_FLASH_ATTR find_file(const char* filename)
     return nullptr;
 }
 
-char* ICACHE_FLASH_ATTR load_file(const file_entry* file,
-                                  int               size_in_front)
+char* ICACHE_FLASH_ATTR load_file(const file_entry* file, int size_in_front)
 {
     if (!fs)
         return nullptr;
@@ -197,15 +202,16 @@ char* ICACHE_FLASH_ATTR load_file(const file_entry* file,
         return nullptr;
     }
 
-    // Pad with zeroes for checksum
-    *reinterpret_cast<uint32_t*>(buf[alloc_size - 4]) = 0;
-
     if (spi_flash_read(offset, reinterpret_cast<uint32_t*>(buf + size_in_front), file->size)
             != SPI_FLASH_RESULT_OK) {
         os_printf("Error: failed to read file\n");
         os_free(buf);
         return nullptr;
     }
+
+    // Pad with zeroes for checksum
+    for (uint32_t i = size_in_front + file->size; i < alloc_size; i++)
+        buf[i] = 0;
 
     const uint32_t checksum = calc_checksum(reinterpret_cast<uint32_t*>(buf + size_in_front),
                                             reinterpret_cast<uint32_t*>(buf + alloc_size));
@@ -217,4 +223,46 @@ char* ICACHE_FLASH_ATTR load_file(const file_entry* file,
     }
 
     return buf;
+}
+
+int ICACHE_FLASH_ATTR write_fs(const char* data, int size)
+{
+    if (fs) {
+        os_free(fs);
+        fs = nullptr;
+    }
+
+    int sector = data_begin / SPI_FLASH_SEC_SIZE;
+    const int end_sector = sector + ((size - 1) / SPI_FLASH_SEC_SIZE) + 1;
+
+    for ( ; sector < end_sector; ++sector) {
+        if (spi_flash_erase_sector(sector) != SPI_FLASH_RESULT_OK) {
+            os_printf("Error: failed to erase sector %d\n", sector);
+            return 1;
+        }
+    }
+
+    uint32_t buf[1024];
+    uint32_t dest = data_begin;
+
+    while (size) {
+
+        const int copy_size = size > sizeof(buf) ? sizeof(buf) : size;
+
+        if (copy_size < sizeof(buf))
+            buf[copy_size >> 2] = 0;
+
+        os_memcpy(buf, data, copy_size);
+
+        if (spi_flash_write(dest, buf, ((copy_size - 1u) & ~3u) + 4u) != SPI_FLASH_RESULT_OK) {
+            os_printf("Error: failed to write 0x%x bytes at offset 0x%x\n",
+                      copy_size, dest);
+            return 1;
+        }
+
+        data += copy_size;
+        size -= copy_size;
+    }
+
+    return init_filesystem();
 }

@@ -17,7 +17,8 @@ def Checksum(data):
     assert (len(data) & 3) == 0
     checksum = 0
     for i in range(0, len(data), 4):
-        checksum = (checksum - struct.unpack("<I", data[i : i + 4])[0]) & 0xFFFFFFFF
+        value = struct.unpack("<I", data[i : i + 4])[0]
+        checksum = (checksum - value) & 0xFFFFFFFF
     return checksum
 
 class Entry:
@@ -49,14 +50,14 @@ class Entry:
 
 files = list(map(Entry, os.listdir(dir)))
 
-# 28 is size of file_entry structure in bytes, 12 is the header size
-fs_hdr_size = len(files) * 28 + 12
+# 28 is size of file_entry structure in bytes, 12 is the fs header size
+fs_dir_size = len(files) * 28 + 12
 
 data   = bytes()
 fs_hdr = struct.pack("<I", len(files))
 
 for file in files:
-    offset = len(data) + fs_hdr_size
+    offset = len(data) + fs_dir_size
     data += file.contents
 
     fs_hdr += struct.pack("<16sIII", file.filename.encode(), file.size, file.checksum, offset)

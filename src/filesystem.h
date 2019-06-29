@@ -22,11 +22,12 @@ struct filesystem
     file_entry entries[1];
 };
 
-void init_filesystem();
+int init_filesystem();
 
 const file_entry* find_file(const char* filename);
 
-char* load_file(const file_entry* file,
-                int               size_in_front = 0);
+char* load_file(const file_entry* file, int size_in_front = 0);
+
+int write_fs(const char* data, int size);
 
 #endif

@@ -206,6 +206,30 @@ static const char* ICACHE_FLASH_ATTR get_mime_type(const char* uri, int len)
     return nullptr;
 }
 
+text_entry ICACHE_FLASH_ATTR get_header(const text_entry& headers,
+                                        const char*       header_name)
+{
+    auto begin = os_strstr(headers.text, header_name);
+
+    if ( ! begin)
+        return text_entry{nullptr, 0};
+
+    begin += os_strlen(header_name);
+
+    for ( ; *begin == ' '; ++begin);
+
+    auto end = begin;
+
+    for (;; ++end) {
+        const char c = *end;
+
+        if (c == '\r' || c == 0)
+            break;
+    }
+
+    return text_entry{begin, end - begin};
+}
+
 static const handler_entry* request_handlers     = nullptr;
 static const handler_entry* request_handlers_end = nullptr;
 
@@ -238,6 +262,24 @@ static int ICACHE_FLASH_ATTR handle_request(request_type      method,
                     headers.text[i] = 0;
                     break;
                 }
+            }
+
+            // Check Content-Length in a POST request
+            if (method == POST_METHOD) {
+
+                const auto len_hdr = get_header(headers, "Content-Length:");
+                if (!len_hdr.len || len_hdr.len > 5)
+                    return 400;
+
+                unsigned clen = 0;
+                for (const auto c : len_hdr) {
+                    if (c < '0' || c > '9')
+                        return 400;
+                    clen = clen * 10 + (c - '0');
+                }
+
+                if (clen != payload.len)
+                    return 400;
             }
 
             return h->handler(query, headers, payload);
