@@ -12,7 +12,7 @@ monitor:
 upload_and_monitor: upload
 	@$(MAKE) monitor
 
-fs.bin:
+fs.bin: tools/mkfs.py $(wildcard www/*)
 	python tools/mkfs.py www $@
 
 upload_fs: fs.bin
@@ -23,4 +23,4 @@ else
 	@false
 endif
 
-.PHONY: build upload monitor upload_and_monitor
+.PHONY: build upload monitor upload_and_monitor upload_fs
