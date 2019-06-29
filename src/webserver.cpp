@@ -29,6 +29,8 @@ static void ICACHE_FLASH_ATTR configure_mdns()
 
             static mdns_info mdns = { };
 
+            // TODO get mDNS name from config
+
             mdns.host_name   = const_cast<char*>(MDNS_NAME);
             mdns.ipAddr      = ipconfig.ip.addr;
             mdns.server_name = const_cast<char*>(MDNS_NAME);
@@ -96,6 +98,7 @@ static void ICACHE_FLASH_ATTR configure_wifi()
 
 static void ICACHE_FLASH_ATTR configure_ntp()
 {
+    // TODO Get servers and timezone from configuration
     sntp_setservername(0, const_cast<char*>("time.euro.apple.com"));
     sntp_setservername(1, const_cast<char*>("time.google.com"));
     sntp_setservername(2, const_cast<char*>("pool.ntp.org"));
@@ -128,11 +131,11 @@ static void ICACHE_FLASH_ATTR print_conn_info(espconn* conn, const char* what, i
               number);
 }
 
-static void ICACHE_FLASH_ATTR webserver_send_response(espconn*    conn,
-                                                      char*       buf,
-                                                      const char* mime_type,
-                                                      int         head_room,
-                                                      int         payload_size)
+void ICACHE_FLASH_ATTR webserver_send_response(void*       conn,
+                                               char*       buf,
+                                               const char* mime_type,
+                                               int         head_room,
+                                               int         payload_size)
 {
     os_sprintf(buf, "HTTP/1.1 200 OK\nContent-Type: %s\nContent-Length: %d\n\n",
                mime_type, payload_size);
@@ -142,7 +145,20 @@ static void ICACHE_FLASH_ATTR webserver_send_response(espconn*    conn,
 
     os_memmove(out, buf, head_size);
 
-    espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + payload_size);
+    espconn_send(static_cast<espconn*>(conn),
+                 reinterpret_cast<uint8_t*>(out),
+                 head_size + payload_size);
+}
+
+void ICACHE_FLASH_ATTR webserver_send_ok(void* conn)
+{
+    char buf[HTTP_HEAD_SIZE];
+
+    webserver_send_response(conn,
+                            buf,
+                            "text/plain",
+                            sizeof(buf),
+                            0);
 }
 
 static void ICACHE_FLASH_ATTR webserver_send_error(espconn* conn,
@@ -233,7 +249,8 @@ text_entry ICACHE_FLASH_ATTR get_header(const text_entry& headers,
 static const handler_entry* request_handlers     = nullptr;
 static const handler_entry* request_handlers_end = nullptr;
 
-static int ICACHE_FLASH_ATTR handle_request(request_type      method,
+static int ICACHE_FLASH_ATTR handle_request(espconn*          conn,
+                                            request_type      method,
                                             const text_entry& uri,
                                             const text_entry& query,
                                             const text_entry& headers_and_payload)
@@ -282,7 +299,7 @@ static int ICACHE_FLASH_ATTR handle_request(request_type      method,
                     return 400;
             }
 
-            return h->handler(query, headers, payload);
+            return h->handler(conn, query, headers, payload);
         }
     }
 
@@ -389,14 +406,14 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
     if (e[method].len == 3 && os_memcmp(e[method].text, "GET", 3) == 0 && e[uri].len) {
 
-        const int err = handle_request(GET_METHOD, e[uri], e[query], e[headers]);
+        const int err = handle_request(conn, GET_METHOD, e[uri], e[query], e[headers]);
 
         if (err == 404)  {
 
             // Serve a static file
             // -------------------
 
-            constexpr int head_room = 64;
+            constexpr int head_room = HTTP_HEAD_SIZE;
             auto fentry = find_file(e[uri].text);
 
             if (!fentry)
@@ -433,7 +450,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
     else if (e[method].len == 4 && os_memcmp(e[method].text, "POST", 4) == 0 && e[uri].len) {
 
-        const int err = handle_request(POST_METHOD, e[uri], e[query], e[headers]);
+        const int err = handle_request(conn, POST_METHOD, e[uri], e[query], e[headers]);
 
         if (err)
             webserver_send_error(conn, err);

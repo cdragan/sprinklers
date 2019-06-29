@@ -9,7 +9,8 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
-static int ICACHE_FLASH_ATTR upload_fs(const text_entry& query,
+static int ICACHE_FLASH_ATTR upload_fs(void*             conn,
+                                       const text_entry& query,
                                        const text_entry& headers,
                                        const text_entry& payload)
 {
@@ -25,19 +26,128 @@ static int ICACHE_FLASH_ATTR upload_fs(const text_entry& query,
     if (!write_fs(payload.text, payload.len))
         return 400;
 
-    // TODO send 200
+    webserver_send_ok(conn);
+
+    return 0;
+}
+
+static int ICACHE_FLASH_ATTR safe_concat(char* buf, int buf_size, int pos, const char* in)
+{
+    const auto in_len  = os_strlen(in);
+    const int  new_pos = pos + in_len;
+    if (new_pos < buf_size)
+        os_memcpy(&buf[pos], in, in_len);
+    else
+        os_printf("overflow %d\n", new_pos - HTTP_HEAD_SIZE);
+    return new_pos;
+}
+
+static int ICACHE_FLASH_ATTR sysinfo(void*             conn,
+                                     const text_entry& query,
+                                     const text_entry& headers,
+                                     const text_entry& payload)
+{
+    char reply[HTTP_HEAD_SIZE + 256];
+    char tmp[32];
+    int  pos = HTTP_HEAD_SIZE;
+
+    const auto print_json = [&reply, &pos](const char* in) ICACHE_FLASH_ATTR {
+        pos = safe_concat(reply, sizeof(reply), pos, in);
+    };
+
+    print_json("{\"sdk\":\"");
+    print_json(system_get_sdk_version());
+
+    print_json("\",\"heap_free\":");
+    os_sprintf(tmp, "%u", system_get_free_heap_size());
+    print_json(tmp);
+
+    print_json(",\"uptime_us\":");
+    os_sprintf(tmp, "%u", system_get_time());
+    print_json(tmp);
+
+    print_json(",\"reset_reason\":");
+    const rst_info* const reset_info = system_get_rst_info();
+    os_sprintf(tmp, "%u", reset_info->reason);
+    print_json(tmp);
+
+    const uint32_t cur_time = sntp_get_current_timestamp();
+    print_json(",\"timestamp\":");
+    os_sprintf(tmp, "%u", cur_time);
+    print_json(tmp);
+
+    print_json(",\"cur_time\":");
+    if (cur_time) {
+        print_json("\"");
+        print_json(sntp_get_real_time(cur_time));
+        print_json("\"");
+    }
+    else
+        print_json("null");
+
+    print_json(",\"timezone\":");
+    os_sprintf(tmp, "%d", sntp_get_timezone());
+    print_json(tmp);
+
+    print_json(",\"wifi_mode\":");
+    const uint8_t wifi_mode = wifi_get_opmode();
+    os_sprintf(tmp, "%u", wifi_mode);
+    print_json(tmp);
+
+    if (wifi_mode == STATION_MODE) {
+        print_json(",\"ip\":");
+        const uint8_t conn_status = wifi_station_get_connect_status();
+        if (conn_status == STATION_GOT_IP) {
+
+            ip_info ipconfig;
+            if (wifi_get_ip_info(STATION_IF, &ipconfig)) {
+                os_sprintf(tmp, "\"%u.%u.%u.%u\"",
+                           ipconfig.ip.addr & 0xFFU,
+                           (ipconfig.ip.addr >> 8) & 0xFFU,
+                           (ipconfig.ip.addr >> 16) & 0xFFU,
+                           ipconfig.ip.addr >> 24);
+                print_json(tmp);
+            }
+            else
+                print_json("null");
+        }
+        else
+            print_json("null");
+    }
+
+    uint8_t m[6];
+    if (wifi_get_macaddr(STATION_IF, &m[0])) {
+        print_json(",\"mac\":\"");
+        os_sprintf(tmp, "%02X:%02X:%02X:%02X:%02X:%02X\"",
+                   m[0], m[1], m[2], m[3], m[4], m[5]);
+        print_json(tmp);
+    }
+
+    print_json("}");
+
+    const int end = pos > sizeof(reply) ? sizeof(reply) : pos;
+    webserver_send_response(conn, reply, "application/json", HTTP_HEAD_SIZE, end - HTTP_HEAD_SIZE);
+
     return 0;
 }
 
 static const handler_entry web_handlers[] = {
+    { GET_METHOD,  "sysinfo",   sysinfo },
     { POST_METHOD, "upload_fs", upload_fs }
 };
 
 extern "C" void ICACHE_FLASH_ATTR user_init()
 {
+    os_printf("boot version %u\n", system_get_boot_version());
+    os_printf("boot mode %u\n", system_get_boot_mode());
+
     init_filesystem();
 
+    // TODO read config
+
     configure_webserver(&web_handlers[0], sizeof(web_handlers) / sizeof(web_handlers[0]));
+
+    // TODO should we init mdns from callback installed withs system_init_done_cb???
 
     static os_timer_t timer;
     os_timer_disarm(&timer);

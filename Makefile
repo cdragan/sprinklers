@@ -23,4 +23,7 @@ else
 	@false
 endif
 
-.PHONY: build upload monitor upload_and_monitor upload_fs
+sysinfo:
+	curl http://$(ip)/sysinfo
+
+.PHONY: build upload monitor upload_and_monitor upload_fs sysinfo
