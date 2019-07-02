@@ -19,10 +19,21 @@ struct text_entry {
     const char* end() const   { return text + len; }
 };
 
-typedef int (*request_handler)(void*             conn,
-                               const text_entry& query,
-                               const text_entry& headers,
-                               const text_entry& payload);
+enum HTTPStatus {
+    NO_ERROR                   = 0, // internal, indicates that handler sent request
+    HTTP_CONTINUE              = 100,
+    HTTP_OK                    = 200,
+    HTTP_BAD_REQUEST           = 400,
+    HTTP_NOT_FOUND             = 404,
+    HTTP_INTERNAL_SERVER_ERROR = 500,
+    HTTP_SERVICE_UNAVAILABLE   = 503
+};
+
+typedef HTTPStatus (*request_handler)(void*             conn,
+                                      const text_entry& query,
+                                      const text_entry& headers,
+                                      unsigned          payload_offset,
+                                      const text_entry& payload);
 
 struct handler_entry {
     request_type    method;
@@ -36,8 +47,6 @@ void configure_webserver(const handler_entry* user_request_handlers,
 void start_wps();
 
 text_entry get_header(const text_entry& headers, const char* header_name);
-
-void webserver_send_ok(void* conn);
 
 void webserver_send_response(void*       conn,
                              char*       buf,

@@ -9,26 +9,27 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
-static int ICACHE_FLASH_ATTR upload_fs(void*             conn,
-                                       const text_entry& query,
-                                       const text_entry& headers,
-                                       const text_entry& payload)
+static HTTPStatus ICACHE_FLASH_ATTR upload_fs(void*             conn,
+                                              const text_entry& query,
+                                              const text_entry& headers,
+                                              unsigned          payload_offset,
+                                              const text_entry& payload)
 {
 #if 0
     if (!button)
-        return 404;
+        return HTTP_NOT_FOUND;
 #endif
 
     const auto ctype = get_header(headers, "Content-Type:");
-    if (os_strncmp(ctype.text, "application/octet-stream", ctype.len))
-        return 400;
+    if (os_strncmp(ctype.text, "application/octet-stream", ctype.len)) {
+        os_printf("Error: invalid content type\n");
+        return HTTP_BAD_REQUEST;
+    }
 
-    if (!write_fs(payload.text, payload.len))
-        return 400;
+    if (write_fs(payload_offset, payload.text, payload.len))
+        return HTTP_BAD_REQUEST;
 
-    webserver_send_ok(conn);
-
-    return 0;
+    return NO_ERROR;
 }
 
 static int ICACHE_FLASH_ATTR safe_concat(char* buf, int buf_size, int pos, const char* in)
@@ -42,10 +43,11 @@ static int ICACHE_FLASH_ATTR safe_concat(char* buf, int buf_size, int pos, const
     return new_pos;
 }
 
-static int ICACHE_FLASH_ATTR sysinfo(void*             conn,
-                                     const text_entry& query,
-                                     const text_entry& headers,
-                                     const text_entry& payload)
+static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
+                                            const text_entry& query,
+                                            const text_entry& headers,
+                                            unsigned          payload_offset,
+                                            const text_entry& payload)
 {
     char reply[HTTP_HEAD_SIZE + 256];
     char tmp[32];
@@ -72,14 +74,16 @@ static int ICACHE_FLASH_ATTR sysinfo(void*             conn,
     print_json(tmp);
 
     const uint32_t cur_time = sntp_get_current_timestamp();
-    print_json(",\"timestamp\":");
-    os_sprintf(tmp, "%u", cur_time);
-    print_json(tmp);
-
     print_json(",\"cur_time\":");
     if (cur_time) {
         print_json("\"");
-        print_json(sntp_get_real_time(cur_time));
+        const char* time_str = sntp_get_real_time(cur_time);
+        const char* eol      = os_strchr(time_str, '\n');
+        const int   len      = eol ? eol - time_str : os_strlen(time_str);
+        const int   len2     = len < sizeof(tmp) - 1 ? len : sizeof(tmp) - 1;
+        os_memcpy(tmp, time_str, len2);
+        tmp[len2] = 0;
+        print_json(tmp);
         print_json("\"");
     }
     else
@@ -128,7 +132,7 @@ static int ICACHE_FLASH_ATTR sysinfo(void*             conn,
     const int end = pos > sizeof(reply) ? sizeof(reply) : pos;
     webserver_send_response(conn, reply, "application/json", HTTP_HEAD_SIZE, end - HTTP_HEAD_SIZE);
 
-    return 0;
+    return NO_ERROR;
 }
 
 static const handler_entry web_handlers[] = {

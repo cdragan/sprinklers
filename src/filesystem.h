@@ -28,6 +28,6 @@ const file_entry* find_file(const char* filename);
 
 char* load_file(const file_entry* file, int size_in_front = 0);
 
-int write_fs(const char* data, int size);
+int write_fs(unsigned offset, const char* data, int size);
 
 #endif

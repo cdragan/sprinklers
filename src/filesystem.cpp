@@ -225,36 +225,44 @@ char* ICACHE_FLASH_ATTR load_file(const file_entry* file, int size_in_front)
     return buf;
 }
 
-int ICACHE_FLASH_ATTR write_fs(const char* data, int size)
+int ICACHE_FLASH_ATTR write_fs(unsigned offset, const char* data, int size)
 {
-    if (fs) {
+    if (fs && offset == 0) {
         os_free(fs);
         fs = nullptr;
     }
 
-    int sector = data_begin / SPI_FLASH_SEC_SIZE;
+    if (offset % SPI_FLASH_SEC_SIZE) {
+        os_printf("Error: invalid offset 0x%08x\n", offset);
+        return 1;
+    }
+
+    int sector = (data_begin + offset) / SPI_FLASH_SEC_SIZE;
     const int end_sector = sector + ((size - 1) / SPI_FLASH_SEC_SIZE) + 1;
 
     for ( ; sector < end_sector; ++sector) {
+        os_printf("erase @0x%08x\n", sector * SPI_FLASH_SEC_SIZE);
         if (spi_flash_erase_sector(sector) != SPI_FLASH_RESULT_OK) {
             os_printf("Error: failed to erase sector %d\n", sector);
             return 1;
         }
     }
 
-    uint32_t buf[1024];
-    uint32_t dest = data_begin;
+    uint32_t buf[SPI_FLASH_SEC_SIZE / sizeof(uint32_t)];
+    uint32_t dest = data_begin + offset;
 
     while (size) {
 
         const int copy_size = size > sizeof(buf) ? sizeof(buf) : size;
 
         if (copy_size < sizeof(buf))
-            buf[copy_size >> 2] = 0;
+            buf[copy_size / sizeof(uint32_t)] = 0;
 
         os_memcpy(buf, data, copy_size);
 
-        if (spi_flash_write(dest, buf, ((copy_size - 1u) & ~3u) + 4u) != SPI_FLASH_RESULT_OK) {
+        const auto write_size = ((copy_size - 1u) & ~3u) + 4u;
+        os_printf("write @0x%08x size 0x%04x\n", dest, write_size);
+        if (spi_flash_write(dest, buf, write_size) != SPI_FLASH_RESULT_OK) {
             os_printf("Error: failed to write 0x%x bytes at offset 0x%x\n",
                       copy_size, dest);
             return 1;
@@ -262,6 +270,7 @@ int ICACHE_FLASH_ATTR write_fs(const char* data, int size)
 
         data += copy_size;
         size -= copy_size;
+        dest += write_size;
     }
 
     return init_filesystem();

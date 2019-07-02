@@ -131,7 +131,7 @@ static void ICACHE_FLASH_ATTR print_conn_info(espconn* conn, const char* what, i
               number);
 }
 
-void ICACHE_FLASH_ATTR webserver_send_response(void*       conn,
+void ICACHE_FLASH_ATTR webserver_send_response(void*       arg,
                                                char*       buf,
                                                const char* mime_type,
                                                int         head_room,
@@ -145,35 +145,38 @@ void ICACHE_FLASH_ATTR webserver_send_response(void*       conn,
 
     os_memmove(out, buf, head_size);
 
-    espconn_send(static_cast<espconn*>(conn),
-                 reinterpret_cast<uint8_t*>(out),
-                 head_size + payload_size);
+    espconn* const conn = static_cast<espconn*>(arg);
+
+    print_conn_info(conn, "reply 200");
+
+    espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + payload_size);
 }
 
-void ICACHE_FLASH_ATTR webserver_send_ok(void* conn)
-{
-    char buf[HTTP_HEAD_SIZE];
-
-    webserver_send_response(conn,
-                            buf,
-                            "text/plain",
-                            sizeof(buf),
-                            0);
-}
-
-static void ICACHE_FLASH_ATTR webserver_send_error(espconn* conn,
-                                                   int      code)
+static void ICACHE_FLASH_ATTR webserver_send_error(espconn*   conn,
+                                                   HTTPStatus code)
 {
     const char* code_str = "500 Internal Server Error";
 
     switch (code) {
 
-        case 400:
+        case HTTP_OK:
+            code_str = "200 OK";
+            break;
+
+        case HTTP_CONTINUE:
+            code_str = "100 Continue";
+            break;
+
+        case HTTP_BAD_REQUEST:
             code_str = "400 Bad Request";
             break;
 
-        case 404:
+        case HTTP_NOT_FOUND:
             code_str = "404 Not Found";
+            break;
+
+        case HTTP_SERVICE_UNAVAILABLE:
+            code_str = "503 Service Unavailable";
             break;
 
         default:
@@ -190,6 +193,8 @@ static void ICACHE_FLASH_ATTR webserver_send_error(espconn* conn,
                head_str,
                code_str,
                tail_str);
+
+    print_conn_info(conn, "reply", static_cast<int>(code));
 
     espconn_send(conn, reinterpret_cast<uint8_t*>(buf), os_strlen(buf));
 }
@@ -246,14 +251,105 @@ text_entry ICACHE_FLASH_ATTR get_header(const text_entry& headers,
     return text_entry{begin, end - begin};
 }
 
+struct saved_conn_t {
+    uint8_t         remote_ip[4];
+    int             remote_port;
+    unsigned        content_length;
+    unsigned        num_received;
+    request_handler handler;
+    text_entry      query;
+    text_entry      headers;
+    text_entry      payload;
+    char            data[1];
+};
+
+static constexpr unsigned payload_buf_size = SPI_FLASH_SEC_SIZE;
+
+static saved_conn_t* saved_connections = nullptr;
+
+static HTTPStatus ICACHE_FLASH_ATTR save_connection(espconn*          conn,
+                                                    unsigned          content_length,
+                                                    const text_entry& query,
+                                                    const text_entry& headers,
+                                                    request_handler   handler)
+{
+    if (saved_connections) {
+        os_printf("Error: another connection is pending\n");
+        return HTTP_SERVICE_UNAVAILABLE;
+    }
+
+    const auto alloc_size = sizeof(saved_conn_t) - 1 +
+                            query.len + 1 +
+                            headers.len + 1 +
+                            payload_buf_size;
+    // TODO limit alloc size
+    auto saved_conn = static_cast<saved_conn_t*>(os_malloc(alloc_size));
+
+    if (!saved_conn) {
+        os_printf("Error: out of memory\n");
+        return HTTP_SERVICE_UNAVAILABLE;
+    }
+
+    saved_conn->remote_ip[0]   = conn->proto.tcp->remote_ip[0];
+    saved_conn->remote_ip[1]   = conn->proto.tcp->remote_ip[1];
+    saved_conn->remote_ip[2]   = conn->proto.tcp->remote_ip[2];
+    saved_conn->remote_ip[3]   = conn->proto.tcp->remote_ip[3];
+    saved_conn->remote_port    = conn->proto.tcp->remote_port;
+    saved_conn->content_length = content_length;
+    saved_conn->num_received   = 0;
+    saved_conn->handler        = handler;
+
+    const int headers_pos = query.len + 1;
+    if (query.len)
+        os_memcpy(&saved_conn->data[0], query.text, query.len + 1);
+    os_memcpy(&saved_conn->data[headers_pos], headers.text, headers.len + 1);
+
+    saved_conn->query.text = &saved_conn->data[0];
+    saved_conn->query.len  = query.len;
+
+    saved_conn->headers.text = &saved_conn->data[headers_pos];
+    saved_conn->headers.len  = headers.len;
+
+    saved_conn->payload.text = &saved_conn->data[headers_pos + headers.len + 1];
+    saved_conn->payload.len  = 0;
+
+    saved_connections = saved_conn;
+
+    return HTTP_CONTINUE;
+}
+
+static saved_conn_t* find_saved_connection(espconn* conn)
+{
+    if (saved_connections &&
+        saved_connections->remote_ip[0] == conn->proto.tcp->remote_ip[0] &&
+        saved_connections->remote_ip[1] == conn->proto.tcp->remote_ip[1] &&
+        saved_connections->remote_ip[2] == conn->proto.tcp->remote_ip[2] &&
+        saved_connections->remote_ip[3] == conn->proto.tcp->remote_ip[3] &&
+        saved_connections->remote_port == conn->proto.tcp->remote_port)
+
+        return saved_connections;
+
+    return nullptr;
+}
+
+static void ICACHE_FLASH_ATTR free_connection(espconn *conn)
+{
+    const auto saved_conn = find_saved_connection(conn);
+
+    if (saved_conn) {
+        os_free(saved_connections);
+        saved_connections = nullptr;
+    }
+}
+
 static const handler_entry* request_handlers     = nullptr;
 static const handler_entry* request_handlers_end = nullptr;
 
-static int ICACHE_FLASH_ATTR handle_request(espconn*          conn,
-                                            request_type      method,
-                                            const text_entry& uri,
-                                            const text_entry& query,
-                                            const text_entry& headers_and_payload)
+static HTTPStatus ICACHE_FLASH_ATTR handle_request(espconn*          conn,
+                                                   request_type      method,
+                                                   const text_entry& uri,
+                                                   const text_entry& query,
+                                                   const text_entry& headers_and_payload)
 {
     for (auto h = request_handlers; h != request_handlers_end; h++) {
 
@@ -285,25 +381,120 @@ static int ICACHE_FLASH_ATTR handle_request(espconn*          conn,
             if (method == POST_METHOD) {
 
                 const auto len_hdr = get_header(headers, "Content-Length:");
-                if (!len_hdr.len || len_hdr.len > 5)
-                    return 400;
+                if (!len_hdr.len || len_hdr.len > 5) {
+                    os_printf("Error: invalid or unsupported Content-Length header\n");
+                    return HTTP_BAD_REQUEST;
+                }
 
                 unsigned clen = 0;
                 for (const auto c : len_hdr) {
-                    if (c < '0' || c > '9')
-                        return 400;
+                    if (c < '0' || c > '9') {
+                        os_printf("Error: invalid Content-Length header\n");
+                        return HTTP_BAD_REQUEST;
+                    }
                     clen = clen * 10 + (c - '0');
                 }
 
-                if (clen != payload.len)
-                    return 400;
+                // Handle Expect: 100-continue
+                if (payload.len == 0 && clen > 0) {
+                    const auto expect_hdr = get_header(headers, "Expect:");
+                    if (os_strncmp(expect_hdr.text, "100-continue", expect_hdr.len) == 0)
+                        return save_connection(conn, clen, query, headers, h->handler);
+                }
+
+                if (clen != payload.len) {
+                    os_printf("Error: incorrect payload length, header says %u but it is %d\n",
+                              clen, payload.len);
+                    return HTTP_BAD_REQUEST;
+                }
             }
 
-            return h->handler(conn, query, headers, payload);
+            return h->handler(conn, query, headers, 0, payload);
         }
     }
 
-    return 404;
+    return HTTP_NOT_FOUND;
+}
+
+static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
+                                             saved_conn_t& saved_conn,
+                                             char*         pusrdata,
+                                             uint16_t      length)
+{
+    auto& payload = saved_conn.payload;
+
+    const auto total_size = saved_conn.num_received + payload.len + length;
+
+    if (total_size > saved_conn.content_length) {
+        os_printf("Error: received too much data\n");
+        webserver_send_error(conn, HTTP_BAD_REQUEST);
+        return;
+    }
+
+    const bool last_bit = total_size == saved_conn.content_length;
+
+    if (payload.len) {
+
+        const auto room_left = payload_buf_size - payload.len;
+        const auto part_size = length > room_left ? room_left : length;
+        os_memcpy(&payload.text[payload.len], pusrdata, part_size);
+        payload.len += part_size;
+
+        if (payload.len == payload_buf_size || last_bit) {
+
+            const auto err = saved_conn.handler(conn,
+                                                saved_conn.query,
+                                                saved_conn.headers,
+                                                saved_conn.num_received,
+                                                payload);
+
+            if (err) {
+                webserver_send_error(conn, err);
+                free_connection(conn);
+                return;
+            }
+
+            saved_conn.num_received += payload.len;
+            payload.len = 0;
+        }
+
+        pusrdata += part_size;
+        length   -= part_size;
+    }
+
+    if (length && (length > payload_buf_size || last_bit)) {
+
+        const auto part_size = last_bit ? length : (length - length % payload_buf_size);
+
+        text_entry tmp_payload{ pusrdata, static_cast<int>(part_size) };
+
+        const auto err = saved_conn.handler(conn,
+                                            saved_conn.query,
+                                            saved_conn.headers,
+                                            saved_conn.num_received,
+                                            tmp_payload);
+
+        if (err) {
+            webserver_send_error(conn, err);
+            free_connection(conn);
+            return;
+        }
+
+        saved_conn.num_received += part_size;
+
+        pusrdata += part_size;
+        length   -= part_size;
+    }
+
+    if (length) {
+        os_memcpy(payload.text, pusrdata, length);
+        payload.len = length;
+    }
+
+    webserver_send_error(conn, last_bit ? HTTP_OK : HTTP_CONTINUE);
+
+    if (last_bit)
+        free_connection(conn);
 }
 
 static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned short length)
@@ -311,6 +502,16 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
     espconn* const conn = static_cast<espconn*>(arg);
 
     print_conn_info(conn, "receive", static_cast<int>(length));
+
+    //========================================================================
+    // Handle more incoming data from an existing connection
+    //========================================================================
+
+    const auto saved_conn = find_saved_connection(conn);
+    if (saved_conn) {
+        recv_more_data(conn, *saved_conn, pusrdata, length);
+        return;
+    }
 
     //========================================================================
     // Extract method, URI, HTTP version and headers
@@ -360,6 +561,15 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
         }
     }
 
+    os_printf("%u.%u.%u.%u:%d %s %s\n",
+              conn->proto.tcp->remote_ip[0],
+              conn->proto.tcp->remote_ip[1],
+              conn->proto.tcp->remote_ip[2],
+              conn->proto.tcp->remote_ip[3],
+              conn->proto.tcp->remote_port,
+              e[method].text,
+              e[uri].text);
+
     //========================================================================
     // Separate arguments from URI
     //========================================================================
@@ -406,9 +616,9 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
     if (e[method].len == 3 && os_memcmp(e[method].text, "GET", 3) == 0 && e[uri].len) {
 
-        const int err = handle_request(conn, GET_METHOD, e[uri], e[query], e[headers]);
+        const auto err = handle_request(conn, GET_METHOD, e[uri], e[query], e[headers]);
 
-        if (err == 404)  {
+        if (err == HTTP_NOT_FOUND)  {
 
             // Serve a static file
             // -------------------
@@ -438,7 +648,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
                 os_free(file);
             }
             else
-                webserver_send_error(conn, 404);
+                webserver_send_error(conn, HTTP_NOT_FOUND);
         }
         else if (err)
             webserver_send_error(conn, err);
@@ -450,7 +660,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
     else if (e[method].len == 4 && os_memcmp(e[method].text, "POST", 4) == 0 && e[uri].len) {
 
-        const int err = handle_request(conn, POST_METHOD, e[uri], e[query], e[headers]);
+        const auto err = handle_request(conn, POST_METHOD, e[uri], e[query], e[headers]);
 
         if (err)
             webserver_send_error(conn, err);
@@ -461,7 +671,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
     //========================================================================
 
     else
-        webserver_send_error(conn, 400);
+        webserver_send_error(conn, HTTP_BAD_REQUEST);
 }
 
 static void ICACHE_FLASH_ATTR webserver_reconnect(void* arg, sint8 err)
@@ -476,6 +686,8 @@ static void ICACHE_FLASH_ATTR webserver_disconnect(void* arg)
     espconn* const conn = static_cast<espconn*>(arg);
 
     print_conn_info(conn, "disconnect");
+
+    free_connection(conn);
 }
 
 static void ICACHE_FLASH_ATTR webserver_listen(void* arg)
