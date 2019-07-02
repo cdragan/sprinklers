@@ -20,7 +20,6 @@ static void ICACHE_FLASH_ATTR configure_mdns()
     os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
 
         ip_info ipconfig;
-
         wifi_get_ip_info(STATION_IF, &ipconfig);
 
         static uint32_t last_ip = 0;
@@ -96,7 +95,7 @@ static void ICACHE_FLASH_ATTR configure_wifi()
     }
 }
 
-static void ICACHE_FLASH_ATTR configure_ntp()
+void ICACHE_FLASH_ATTR configure_ntp()
 {
     // TODO Get servers and timezone from configuration
     sntp_setservername(0, const_cast<char*>("time.euro.apple.com"));
@@ -713,8 +712,6 @@ void ICACHE_FLASH_ATTR configure_webserver(const handler_entry* user_request_han
     configure_wifi();
 
     configure_mdns();
-
-    configure_ntp();
 
     static espconn conn;
     static esp_tcp tcp;

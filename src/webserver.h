@@ -41,8 +41,12 @@ struct handler_entry {
     request_handler handler;
 };
 
+// Configures the webserver, to be called from user_init()
 void configure_webserver(const handler_entry* user_request_handlers,
                          unsigned             num_user_handlers);
+
+// Configures NTP, to be called from callback installed with system_init_done_cb()
+void configure_ntp();
 
 void start_wps();
 

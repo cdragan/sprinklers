@@ -135,6 +135,26 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
     return HTTP_RESPONSE_SENT;
 }
 
+static void ICACHE_FLASH_ATTR init_done()
+{
+    os_printf("init done\n");
+
+    configure_ntp();
+
+    static os_timer_t timer;
+    os_timer_disarm(&timer);
+    os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
+
+            const auto timestamp = sntp_get_current_timestamp();
+            if (timestamp) {
+                const auto real_time = sntp_get_real_time(timestamp);
+                os_printf("time: %s", real_time);
+            }
+        },
+        nullptr);
+    os_timer_arm(&timer, 1000, true);
+}
+
 static const handler_entry web_handlers[] = {
     { GET_METHOD,  "sysinfo",   sysinfo },
     { POST_METHOD, "upload_fs", upload_fs }
@@ -151,17 +171,5 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
 
     configure_webserver(&web_handlers[0], sizeof(web_handlers) / sizeof(web_handlers[0]));
 
-    // TODO should we init mdns from callback installed withs system_init_done_cb???
-
-    static os_timer_t timer;
-    os_timer_disarm(&timer);
-    os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
-            const auto timestamp = sntp_get_current_timestamp();
-            if (timestamp) {
-                const auto real_time = sntp_get_real_time(timestamp);
-                os_printf("time: %s", real_time);
-            }
-        },
-        nullptr);
-    os_timer_arm(&timer, 1000, true);
+    system_init_done_cb(init_done);
 }
