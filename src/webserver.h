@@ -20,7 +20,7 @@ struct text_entry {
 };
 
 enum HTTPStatus {
-    NO_ERROR                   = 0, // internal, indicates that handler sent a reply
+    HTTP_RESPONSE_SENT         = 0, // internal, indicates that handler sent a response
     HTTP_CONTINUE              = 100,
     HTTP_OK                    = 200,
     HTTP_BAD_REQUEST           = 400,

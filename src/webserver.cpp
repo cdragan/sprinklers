@@ -147,7 +147,7 @@ void ICACHE_FLASH_ATTR webserver_send_response(void*       arg,
 
     espconn* const conn = static_cast<espconn*>(arg);
 
-    print_conn_info(conn, "reply 200");
+    print_conn_info(conn, "response 200");
 
     espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + payload_size);
 }
@@ -194,7 +194,7 @@ static void ICACHE_FLASH_ATTR webserver_send_error(espconn*   conn,
                code_str,
                tail_str);
 
-    print_conn_info(conn, "reply", static_cast<int>(code));
+    print_conn_info(conn, "response", static_cast<int>(code));
 
     espconn_send(conn, reinterpret_cast<uint8_t*>(buf), os_strlen(buf));
 }

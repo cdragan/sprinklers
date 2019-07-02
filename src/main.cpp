@@ -49,12 +49,12 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
                                             unsigned          payload_offset,
                                             const text_entry& payload)
 {
-    char reply[HTTP_HEAD_SIZE + 256];
+    char response[HTTP_HEAD_SIZE + 256];
     char tmp[32];
     int  pos = HTTP_HEAD_SIZE;
 
-    const auto print_json = [&reply, &pos](const char* in) ICACHE_FLASH_ATTR {
-        pos = safe_concat(reply, sizeof(reply), pos, in);
+    const auto print_json = [&response, &pos](const char* in) ICACHE_FLASH_ATTR {
+        pos = safe_concat(response, sizeof(response), pos, in);
     };
 
     print_json("{\"sdk\":\"");
@@ -129,10 +129,10 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
 
     print_json("}");
 
-    const int end = pos > sizeof(reply) ? sizeof(reply) : pos;
-    webserver_send_response(conn, reply, "application/json", HTTP_HEAD_SIZE, end - HTTP_HEAD_SIZE);
+    const int end = pos > sizeof(response) ? sizeof(response) : pos;
+    webserver_send_response(conn, response, "application/json", HTTP_HEAD_SIZE, end - HTTP_HEAD_SIZE);
 
-    return NO_ERROR;
+    return HTTP_RESPONSE_SENT;
 }
 
 static const handler_entry web_handlers[] = {
