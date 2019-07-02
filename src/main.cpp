@@ -29,7 +29,7 @@ static HTTPStatus ICACHE_FLASH_ATTR upload_fs(void*             conn,
     if (write_fs(payload_offset, payload.text, payload.len))
         return HTTP_BAD_REQUEST;
 
-    return NO_ERROR;
+    return HTTP_CONTINUE;
 }
 
 static int ICACHE_FLASH_ATTR safe_concat(char* buf, int buf_size, int pos, const char* in)

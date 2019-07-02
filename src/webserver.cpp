@@ -453,7 +453,7 @@ static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
                                                 saved_conn.num_received,
                                                 payload);
 
-            if (err) {
+            if (err && err != HTTP_CONTINUE) {
                 webserver_send_error(conn, err);
                 free_connection(conn);
                 return;
@@ -479,7 +479,7 @@ static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
                                             saved_conn.num_received,
                                             tmp_payload);
 
-        if (err) {
+        if (err && err != HTTP_CONTINUE) {
             webserver_send_error(conn, err);
             free_connection(conn);
             return;
