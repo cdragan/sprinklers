@@ -9,6 +9,32 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
+enum lohi {
+    lo,
+    hi
+};
+
+class gpio {
+    public:
+        explicit gpio(int id) : id(id) { }
+        void init_output(lohi value) {
+            GPIO_OUTPUT_SET(id, value ? 1 : 0);
+        }
+        void init_input() {
+            GPIO_INIT_IN(id);
+        }
+        lohi read() const {
+            return (GPIO_REG_READ(GPIO_IN_ADDRESS) & BIT(id)) ? hi : lo;
+        }
+        void write(lohi value) {
+            const int reg = value ? GPIO_OUT_W1TS_ADDRESS : GPIO_OUT_W1TC_ADDRESS;
+            GPIO_REG_WRITE(reg, 1 << id);
+        }
+
+    private:
+        int id;
+};
+
 static HTTPStatus ICACHE_FLASH_ATTR upload_fs(void*             conn,
                                               const text_entry& query,
                                               const text_entry& headers,
@@ -145,6 +171,15 @@ static void ICACHE_FLASH_ATTR init_done()
     os_timer_disarm(&timer);
     os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
 
+            static int status = 0;
+            static bool init = false;
+            if (!init) {
+                gpio(5).init_output(lo);
+                init = true;
+            }
+            gpio(5).write(status ? hi : lo);
+            status = (~status) & 1;
+
             const auto timestamp = sntp_get_current_timestamp();
             if (timestamp) {
                 const auto real_time = sntp_get_real_time(timestamp);
@@ -164,6 +199,8 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
 {
     os_printf("boot version %u\n", system_get_boot_version());
     os_printf("boot mode %u\n", system_get_boot_mode());
+
+    gpio_init();
 
     init_filesystem();
 
