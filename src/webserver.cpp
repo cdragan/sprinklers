@@ -282,8 +282,13 @@ static HTTPStatus ICACHE_FLASH_ATTR save_connection(espconn*          conn,
                             query.len + 1 +
                             headers.len + 1 +
                             payload_buf_size;
-    // TODO limit alloc size
-    auto saved_conn = static_cast<saved_conn_t*>(os_malloc(alloc_size));
+
+    if (alloc_size > 1024 + payload_buf_size) {
+        os_printf("Error: query or headers too large\n");
+        return HTTP_BAD_REQUEST;
+    }
+
+    const auto saved_conn = static_cast<saved_conn_t*>(os_malloc(alloc_size));
 
     if (!saved_conn) {
         os_printf("Error: out of memory\n");
