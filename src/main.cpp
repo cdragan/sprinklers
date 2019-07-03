@@ -21,7 +21,7 @@ class gpio {
             GPIO_OUTPUT_SET(id, value ? 1 : 0);
         }
         void init_input() {
-            GPIO_INIT_IN(id);
+            GPIO_DIS_OUTPUT(id);
         }
         lohi read() const {
             return (GPIO_REG_READ(GPIO_IN_ADDRESS) & BIT(id)) ? hi : lo;
@@ -171,13 +171,40 @@ static void ICACHE_FLASH_ATTR init_done()
     os_timer_disarm(&timer);
     os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
 
+            // Group 1, enabled by default: 0 2 4 5
+            // * GPIO 0:
+            //      Beware, pulling it low will cause boot to fail, use only as output.
+            // * GPIO 2:
+            //      The built-in LED is also connected in addition to the
+            //      external pin and is driven with LO (instead of HI).
+            //      Also, gpio_init() initializes this to LO and lights up the
+            //      built-in LED.
+            //
+            // Group 2, each pin requires explicit routing through MUX: 1 3 10 12 13 14 15
+            // * Enable pin routing:
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
+            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
+            // * GPIO1 is UART TX and destroys UART output
+            //
+            // Group 3, unusable GPIOs which affect system functioning: 9
+            //
+            // Group 4: 6 7 8 11 16
+            //  ???
+            constexpr int gpio_id = 15;
+
             static int status = 0;
             static bool init = false;
             if (!init) {
-                gpio(5).init_output(lo);
+                PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
+                gpio(gpio_id).init_output(lo);
                 init = true;
             }
-            gpio(5).write(status ? hi : lo);
+            gpio(gpio_id).write(status ? hi : lo);
             status = (~status) & 1;
 
             const auto timestamp = sntp_get_current_timestamp();
