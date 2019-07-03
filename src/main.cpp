@@ -197,15 +197,15 @@ static void ICACHE_FLASH_ATTR init_done()
             //  ???
             constexpr int gpio_id = 15;
 
-            static int status = 0;
-            static bool init = false;
+            static bool status = false;
+            static bool init   = false;
             if (!init) {
                 PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
                 gpio(gpio_id).init_output(lo);
                 init = true;
             }
             gpio(gpio_id).write(status ? hi : lo);
-            status = (~status) & 1;
+            status = ! status;
 
             const auto timestamp = sntp_get_current_timestamp();
             if (timestamp) {
