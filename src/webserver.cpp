@@ -381,8 +381,8 @@ static HTTPStatus ICACHE_FLASH_ATTR handle_request(espconn*          conn,
                 }
             }
 
-            // Check Content-Length in a POST request
-            if (method == POST_METHOD) {
+            // Check Content-Length in a POST/PUT request
+            if (method == POST_METHOD || method == PUT_METHOD) {
 
                 const auto len_hdr = get_header(headers, "Content-Length:");
                 if (!len_hdr.len || len_hdr.len > 5) {
@@ -659,15 +659,29 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
     }
 
     //========================================================================
-    // Process POST request
+    // Process POST/PUT request
     //========================================================================
 
-    else if (e[method].len == 4 && os_memcmp(e[method].text, "POST", 4) == 0 && e[uri].len) {
+    else if (e[method].len > 2 &&
+             e[method].text[0] == 'P' &&
+             e[uri].len) {
 
-        const auto err = handle_request(conn, POST_METHOD, e[uri], e[query], e[headers]);
+        request_type req = GET_METHOD; // used to indicate bad method
 
-        if (err)
-            webserver_send_error(conn, err);
+        if (os_strncmp(e[method].text, "PUT", 3) == 0)
+            req = PUT_METHOD;
+        else if (os_strncmp(e[method].text, "POST", 4) == 0)
+            req = POST_METHOD;
+
+        if (req != GET_METHOD) {
+
+            const auto err = handle_request(conn, req, e[uri], e[query], e[headers]);
+
+            if (err)
+                webserver_send_error(conn, err);
+        }
+        else
+            webserver_send_error(conn, HTTP_BAD_REQUEST);
     }
 
     //========================================================================

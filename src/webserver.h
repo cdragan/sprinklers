@@ -6,7 +6,8 @@
 
 enum request_type {
     GET_METHOD,
-    POST_METHOD
+    POST_METHOD,
+    PUT_METHOD
 };
 
 struct text_entry {
