@@ -2,7 +2,7 @@
 #ifndef WEBSERVER_H_INCLUDED
 #define WEBSERVER_H_INCLUDED
 
-#define HTTP_HEAD_SIZE 72
+#define HTTP_HEAD_SIZE 80
 
 enum request_type {
     GET_METHOD,
