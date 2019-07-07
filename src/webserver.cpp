@@ -136,7 +136,11 @@ void ICACHE_FLASH_ATTR webserver_send_response(void*       arg,
                                                int         head_room,
                                                int         payload_size)
 {
-    os_sprintf(buf, "HTTP/1.1 200 OK\nContent-Type: %s\nContent-Length: %d\n\n",
+    os_sprintf(buf,
+               "HTTP/1.1 200 OK\r\n"
+               "Content-Type: %s\r\n"
+               "Content-Length: %d\r\n"
+               "\r\n",
                mime_type, payload_size);
 
     const int head_size = os_strlen(buf);
@@ -146,7 +150,7 @@ void ICACHE_FLASH_ATTR webserver_send_response(void*       arg,
 
     espconn* const conn = static_cast<espconn*>(arg);
 
-    print_conn_info(conn, "response 200");
+    print_conn_info(conn, "response 200 content", payload_size);
 
     espconn_send(conn, reinterpret_cast<uint8_t*>(out), head_size + payload_size);
 }
@@ -154,44 +158,52 @@ void ICACHE_FLASH_ATTR webserver_send_response(void*       arg,
 static void ICACHE_FLASH_ATTR webserver_send_error(espconn*   conn,
                                                    HTTPStatus code)
 {
-    const char* code_str = "500 Internal Server Error";
+    char buf[144];
 
-    switch (code) {
-
-        case HTTP_OK:
-            code_str = "200 OK";
-            break;
-
-        case HTTP_CONTINUE:
-            code_str = "100 Continue";
-            break;
-
-        case HTTP_BAD_REQUEST:
-            code_str = "400 Bad Request";
-            break;
-
-        case HTTP_NOT_FOUND:
-            code_str = "404 Not Found";
-            break;
-
-        case HTTP_SERVICE_UNAVAILABLE:
-            code_str = "503 Service Unavailable";
-            break;
-
-        default:
-            break;
+    if (code == HTTP_CONTINUE) {
+        static const char reply_100[] = "HTTP/1.1 100 Continue\r\n\r\n";
+        os_memcpy(buf, reply_100, sizeof(reply_100));
     }
+    else {
 
-    static const char head_str[] = "<html><body><h1>";
-    static const char tail_str[] = "</h1></body></html>";
+        const char* code_str = "500 Internal Server Error";
 
-    char buf[128];
-    os_sprintf(buf, "HTTP/1.1 %s\nContent-Type: text/html\nContent-Length: %d\n\n%s%s%s",
-               code_str,
-               static_cast<int>(sizeof(head_str) - 1 + os_strlen(code_str) + sizeof(tail_str) - 1),
-               head_str,
-               code_str,
-               tail_str);
+        switch (code) {
+
+            case HTTP_OK:
+                code_str = "200 OK";
+                break;
+
+            case HTTP_BAD_REQUEST:
+                code_str = "400 Bad Request";
+                break;
+
+            case HTTP_NOT_FOUND:
+                code_str = "404 Not Found";
+                break;
+
+            case HTTP_SERVICE_UNAVAILABLE:
+                code_str = "503 Service Unavailable";
+                break;
+
+            default:
+                break;
+        }
+
+        static const char head_str[] = "<html><body><h1>";
+        static const char tail_str[] = "</h1></body></html>";
+
+        os_sprintf(buf, "HTTP/1.1 %s\r\n"
+                        "Content-Type: text/html\r\n"
+                        "Content-Length: %d\r\n"
+                        "\r\n"
+                        "%s%s%s",
+                   code_str,
+                   static_cast<int>(sizeof(head_str) - 1 + os_strlen(code_str) + sizeof(tail_str) - 1),
+                   head_str,
+                   code_str,
+                   tail_str);
+    }
 
     print_conn_info(conn, "response", static_cast<int>(code));
 
@@ -209,7 +221,8 @@ static const char* ICACHE_FLASH_ATTR get_mime_type(const char* uri, int len)
     static const mime_entry mime_types[] = {
         { "html", 4, "text/html"       },
         { "css",  3, "text/css"        },
-        { "js",   2, "text/javascript" }
+        { "js",   2, "text/javascript" },
+        { "ico",  3, "image/x-icon"    }
     };
 
     for (const auto& e : mime_types) {
@@ -401,9 +414,18 @@ static HTTPStatus ICACHE_FLASH_ATTR handle_request(espconn*          conn,
 
                 // Handle Expect: 100-continue
                 if (payload.len == 0 && clen > 0) {
+
                     const auto expect_hdr = get_header(headers, "Expect:");
-                    if (os_strncmp(expect_hdr.text, "100-continue", expect_hdr.len) == 0)
-                        return save_connection(conn, clen, query, headers, h->handler);
+                    const bool need_100 =
+                        (expect_hdr.text
+                            && os_strncmp(expect_hdr.text, "100-continue", expect_hdr.len) == 0);
+
+                    const auto err = save_connection(conn, clen, query, headers, h->handler);
+
+                    if (err == HTTP_CONTINUE && ! need_100)
+                        return HTTP_RESPONSE_SENT;
+
+                    return err;
                 }
 
                 if (clen != payload.len) {
@@ -452,7 +474,7 @@ static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
                                                 saved_conn.num_received,
                                                 payload);
 
-            if (err && err != HTTP_CONTINUE) {
+            if (err && err != HTTP_OK) {
                 webserver_send_error(conn, err);
                 free_connection(conn);
                 return;
@@ -478,7 +500,7 @@ static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
                                             saved_conn.num_received,
                                             tmp_payload);
 
-        if (err && err != HTTP_CONTINUE) {
+        if (err && err != HTTP_OK) {
             webserver_send_error(conn, err);
             free_connection(conn);
             return;
@@ -495,10 +517,10 @@ static void ICACHE_FLASH_ATTR recv_more_data(espconn*      conn,
         payload.len = length;
     }
 
-    webserver_send_error(conn, last_bit ? HTTP_OK : HTTP_CONTINUE);
-
-    if (last_bit)
+    if (last_bit) {
+        webserver_send_error(conn, HTTP_OK);
         free_connection(conn);
+    }
 }
 
 static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned short length)
@@ -540,7 +562,10 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
 
         const char c = pusrdata[i];
 
-        if (c == ' ' && s < headers) {
+        if (static_cast<signed char>(c) < 0x20 && c != '\r' && c != '\n')
+            break;
+
+        if (c == ' ' && s < version) {
 
             const unsigned end = i;
             while (i < length && pusrdata[i] == ' ')
@@ -565,14 +590,23 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
         }
     }
 
-    os_printf("%u.%u.%u.%u:%d %s %s\n",
+    if (e[method].len == 0 || e[uri].len == 0 || e[version].len < 6 ||
+        os_memcmp(e[version].text, "HTTP/", 5) != 0) {
+
+        os_printf("Error: bad HTTP header\n");
+        webserver_send_error(conn, HTTP_BAD_REQUEST);
+        return;
+    }
+
+    os_printf("%u.%u.%u.%u:%d %s %s %s\n",
               conn->proto.tcp->remote_ip[0],
               conn->proto.tcp->remote_ip[1],
               conn->proto.tcp->remote_ip[2],
               conn->proto.tcp->remote_ip[3],
               conn->proto.tcp->remote_port,
               e[method].text,
-              e[uri].text);
+              e[uri].text,
+              e[version].text);
 
     //========================================================================
     // Separate arguments from URI
@@ -697,6 +731,8 @@ static void ICACHE_FLASH_ATTR webserver_reconnect(void* arg, sint8 err)
     espconn* const conn = static_cast<espconn*>(arg);
 
     print_conn_info(conn, "reconnect", err);
+
+    free_connection(conn);
 }
 
 static void ICACHE_FLASH_ATTR webserver_disconnect(void* arg)
