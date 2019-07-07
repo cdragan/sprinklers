@@ -204,30 +204,84 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
     return HTTP_RESPONSE_SENT;
 }
 
+// Here is the zone assignment on the NodeMCU v1.0 board
+//                 +----------+
+//                 | A0    D0 | GPIO16
+//                 | RSV   D1 | GPIO5
+//                 | RSV   D2 | GPIO4
+// Zone 5 - GPIO10 | SD3   D3 | GPIO0
+//           GPIO9 | SD2   D4 | GPIO2  - Green LED (status good)
+//                 | SD1  3v3 |
+//                 | CMD  GND |
+//                 | SD0   D5 | GPIO14 - Zone 1
+//                 | CLK   D6 | GPIO12 - Zone 2
+//                 | GND   D7 | GPIO13 - Zone 3
+//                 | 3v3   D8 | GPIO15 - Zone 6
+//                 | EN    D9 | GPIO3  - Zone 4
+//                 | RST  D10 | GPIO1
+//                 | GND  GND |
+//                 | Vin  3v3 |
+//                 +---|USB|--+
+//
+// To supply power:
+//  * Use USB or (but not simultaneously!)
+//  * Put 5V on the Vin PIN and ground on the GND pin next to it.
+//
+// The 3 remaining 3v3 and GND pairs can be used as reference voltage to power
+// stuff outside of the board.
+//
+// GPIO9 is unusable, when this pin is switched to GPIO on the MUX, the board
+// keeps rebooting.
+//
+// GPIO1 is used for UART TX bit and so it is unusable, unless we wanted to lose
+// the ability to use UART.
+//
+// GPIO16 looks like it is unusable (but I may be wrong).
+//
+// GPIOs 5, 4, 0, 2 have LOW state after boot and gpio_init() is called.
+// The remaining GPIOs have HIGH state.
+//
+// GPIO2 is connected to the built-in LED (mounted close to the GPIO16 output pin).
+// This built-in LED is lit when GPIO2 is in LOW state (the default after gpio_init())
+// and it is not lit when GPIO2 is in HIGH state.
+//
+// GPIO0 must not be pulled low or the board won't boot.  It is used to indicate
+// boot mode during boot, after boot it can be used for anything.
+//
+// GPIO15 momentarily comes up in LOW state right after boot and then goes up.
+// Because of this, we use it for zone 6, which is the least likely to be used.
+
 enum zone_status {
-    ZONE_OFF,
+    ZONE_OFF, // TODO make DISABLED the default (0)
     ZONE_DISABLED,
     ZONE_ON
 };
 
-constexpr int num_zones = 6;
+constexpr int      num_zones             = 6;
+static const int   zone_gpios[num_zones] = { 14, 12, 13, 3, 10, 15 };
+static zone_status zones[num_zones]      = { };
 
-static zone_status zones[num_zones] = { };
-static int zone_gpios[num_zones] = { 14, 12, 13, 15, 3, 10 };
-
+// Either turns a specific zone OFF, or turns exactly one zone ON.
+// If ON is requested, any remaining zone that is currently on will be turned OFF.
+// GPIOs 14, 12, 13, 3, 10, 15 are normally in HIGH state after boot.
+// The signal to control the relay must be LOW to turn the relay's electromagnet ON.
+// This is a lucky coincidence, so GPIO state HIGH means that the relay is OFF
+// and GPIO in LOW state means the relay is ON.
+// Note: GPIO 15 momentarily goes to LOW on boot, turning the relay on for a brief
+// moment until we init GPIOs (something like 400ms-ish).
 static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
 {
     for (int i = 0; i < num_zones; i++) {
         if (zones[i] == ZONE_ON && (i != zone || ! on)) {
             os_printf("zone %d off\n", i);
-            gpio(zone_gpios[i]).write(lo);
+            gpio(zone_gpios[i]).write(hi);
             zones[i] = ZONE_OFF;
         }
     }
 
     if (on && zones[zone] == ZONE_OFF) {
         os_printf("zone %d on\n", zone);
-        gpio(zone_gpios[zone]).write(hi);
+        gpio(zone_gpios[zone]).write(lo);
         zones[zone] = ZONE_ON;
     }
 }
@@ -313,17 +367,17 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
 
     // Enable output GPIOs for zones
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
-    gpio(14).init_output(lo);
+    gpio(14).init_output(hi);
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
-    gpio(12).init_output(lo);
+    gpio(12).init_output(hi);
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
-    gpio(13).init_output(lo);
+    gpio(13).init_output(hi);
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
-    gpio(15).init_output(lo);
+    gpio(15).init_output(hi);
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
-    gpio(3).init_output(lo);
+    gpio(3).init_output(hi);
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
-    gpio(10).init_output(lo);
+    gpio(10).init_output(hi);
 
     init_filesystem();
 
