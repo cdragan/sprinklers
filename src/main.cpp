@@ -9,6 +9,49 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
+// Group 1, enabled by default: 0 2 4 5
+// * GPIO 0:
+//      Beware, pulling it low will cause boot to fail, use only as output.
+// * GPIO 2:
+//      The built-in LED is also connected in addition to the
+//      external pin and is driven with LO (instead of HI).
+//      Also, gpio_init() initializes this to LO and lights up the
+//      built-in LED.
+//
+// Group 2, each pin requires explicit routing through MUX: 1 3 10 12 13 14 15
+// * Enable pin routing:
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
+//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
+// * GPIO1 is UART TX and destroys UART output
+//
+// Group 3, unusable GPIOs which affect system functioning: 9
+//
+// Group 4: 6 7 8 11 16
+//  ???
+
+/*
+ *      Initial state:
+ *
+ *      GPIO    State
+ *      =============
+ *      0       HI
+ *      2       lo
+ *      4       lo
+ *      5       lo
+ *      1       HI
+ *      3       HI
+ *      10      HI
+ *      12      HI
+ *      13      HI
+ *      14      HI
+ *      15      HI
+ */
+
 enum lohi {
     lo,
     hi
@@ -55,7 +98,7 @@ static HTTPStatus ICACHE_FLASH_ATTR upload_fs(void*             conn,
     if (write_fs(payload_offset, payload.text, payload.len))
         return HTTP_BAD_REQUEST;
 
-    return HTTP_CONTINUE;
+    return HTTP_OK;
 }
 
 static int ICACHE_FLASH_ATTR safe_concat(char* buf, int buf_size, int pos, const char* in)
@@ -161,6 +204,80 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
     return HTTP_RESPONSE_SENT;
 }
 
+enum zone_status {
+    ZONE_OFF,
+    ZONE_DISABLED,
+    ZONE_ON
+};
+
+constexpr int num_zones = 6;
+
+static zone_status zones[num_zones] = { };
+static int zone_gpios[num_zones] = { 14, 12, 13, 15, 3, 10 };
+
+static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
+{
+    for (int i = 0; i < num_zones; i++) {
+        if (zones[i] == ZONE_ON && (i != zone || ! on)) {
+            os_printf("zone %d off\n", i);
+            gpio(zone_gpios[i]).write(lo);
+            zones[i] = ZONE_OFF;
+        }
+    }
+
+    if (on && zones[zone] == ZONE_OFF) {
+        os_printf("zone %d on\n", zone);
+        gpio(zone_gpios[zone]).write(hi);
+        zones[zone] = ZONE_ON;
+    }
+}
+
+static HTTPStatus ICACHE_FLASH_ATTR manual(void*             conn,
+                                           const text_entry& query,
+                                           const text_entry& headers,
+                                           unsigned          payload_offset,
+                                           const text_entry& payload)
+{
+    // {"zone":#,"state":#}
+    if (payload.len != 20) {
+        os_printf("Error: payload length %d, but should be 14\n", query.len);
+        return HTTP_BAD_REQUEST;
+    }
+
+    if (os_memcmp(payload.text, "{\"zone\":", 8) != 0) {
+        os_printf("Error: query does not start with zone=\n");
+        return HTTP_BAD_REQUEST;
+    }
+
+    if (os_memcmp(&payload.text[9], ",\"state\":", 9) != 0) {
+        os_printf("Error: expected &state=\n");
+        return HTTP_BAD_REQUEST;
+    }
+
+    const char zone_char = payload.text[8];
+    if (zone_char < '1' || zone_char > ('0' + num_zones)) {
+        os_printf("Error: bad zone %c\n", zone_char);
+        return HTTP_BAD_REQUEST;
+    }
+
+    const char state_char = payload.text[18];
+    if (state_char != '0' && state_char != '1') {
+        os_printf("Error: bad state %c\n", state_char);
+        return HTTP_BAD_REQUEST;
+    }
+
+    const int zone = zone_char - '1';
+
+    if (zones[zone] == ZONE_DISABLED) {
+        os_printf("Error: zone %d is disabled\n", zone);
+        return HTTP_BAD_REQUEST;
+    }
+
+    zone_on_off(zone, state_char - '0');
+
+    return HTTP_OK;
+}
+
 static void ICACHE_FLASH_ATTR init_done()
 {
     os_printf("init done\n");
@@ -171,42 +288,6 @@ static void ICACHE_FLASH_ATTR init_done()
     os_timer_disarm(&timer);
     os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
 
-            // Group 1, enabled by default: 0 2 4 5
-            // * GPIO 0:
-            //      Beware, pulling it low will cause boot to fail, use only as output.
-            // * GPIO 2:
-            //      The built-in LED is also connected in addition to the
-            //      external pin and is driven with LO (instead of HI).
-            //      Also, gpio_init() initializes this to LO and lights up the
-            //      built-in LED.
-            //
-            // Group 2, each pin requires explicit routing through MUX: 1 3 10 12 13 14 15
-            // * Enable pin routing:
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
-            //      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
-            // * GPIO1 is UART TX and destroys UART output
-            //
-            // Group 3, unusable GPIOs which affect system functioning: 9
-            //
-            // Group 4: 6 7 8 11 16
-            //  ???
-            constexpr int gpio_id = 15;
-
-            static bool status = false;
-            static bool init   = false;
-            if (!init) {
-                PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
-                gpio(gpio_id).init_output(lo);
-                init = true;
-            }
-            gpio(gpio_id).write(status ? hi : lo);
-            status = ! status;
-
             const auto timestamp = sntp_get_current_timestamp();
             if (timestamp) {
                 const auto real_time = sntp_get_real_time(timestamp);
@@ -214,12 +295,13 @@ static void ICACHE_FLASH_ATTR init_done()
             }
         },
         nullptr);
-    os_timer_arm(&timer, 1000, true);
+    os_timer_arm(&timer, 5000, true);
 }
 
 static const handler_entry web_handlers[] = {
-    { GET_METHOD,  "sysinfo",   sysinfo },
-    { POST_METHOD, "upload_fs", upload_fs }
+    { GET_METHOD,  "sysinfo",   sysinfo   },
+    { POST_METHOD, "upload_fs", upload_fs },
+    { PUT_METHOD,  "manual",    manual    }
 };
 
 extern "C" void ICACHE_FLASH_ATTR user_init()
@@ -228,6 +310,20 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
     os_printf("boot mode %u\n", system_get_boot_mode());
 
     gpio_init();
+
+    // Enable output GPIOs for zones
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
+    gpio(14).init_output(lo);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
+    gpio(12).init_output(lo);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
+    gpio(13).init_output(lo);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
+    gpio(15).init_output(lo);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
+    gpio(3).init_output(lo);
+    PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
+    gpio(10).init_output(lo);
 
     init_filesystem();
 
