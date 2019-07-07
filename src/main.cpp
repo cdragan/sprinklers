@@ -133,10 +133,6 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
     os_sprintf(tmp, "%u", system_get_free_heap_size());
     print_json(tmp);
 
-    print_json(",\"uptime_us\":");
-    os_sprintf(tmp, "%u", system_get_time());
-    print_json(tmp);
-
     print_json(",\"reset_reason\":");
     const rst_info* const reset_info = system_get_rst_info();
     os_sprintf(tmp, "%u", reset_info->reason);

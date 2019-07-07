@@ -133,7 +133,6 @@ function OnPageLoad()
             row.insert("td", name);
             row.insert("td", value);
         };
-        Add("Uptime [s]", parseInt(r.uptime_us) / 1000000.0);
         const reasons = ["Power On", "Watchdog", "Exception", "Soft Watchdog", "Software Reset", "", "Reset"];
         const ridx = r.reset_reason;
         Add("Reset Reason", ridx >= 0 && ridx < reasons.length ? reasons[r.reset_reason] : "" + ridx);
