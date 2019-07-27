@@ -9,10 +9,14 @@ extern "C" {
 
 #include "filesystem.h"
 
-static uint32_t flash_size_b = 0;
-static uint32_t data_begin   = 0;
-static uint32_t data_end     = 0;
-static bool     supports_ota = false;
+static constexpr uint32_t max_data_size = 128u * 1024u;
+
+static uint32_t  flash_size_b = 0u;
+static uint32_t  data_begin   = 0u;
+static uint32_t  data_end     = 0u;
+static uint32_t& log_begin    = data_end;
+static uint32_t  log_end      = 0u;
+static bool      supports_ota = false;
 
 static void ICACHE_FLASH_ATTR configure_flash()
 {
@@ -75,9 +79,16 @@ static void ICACHE_FLASH_ATTR configure_flash()
             break;
     }
 
-    data_end = flash_size_b - 5u * SPI_FLASH_SEC_SIZE; // 5 sectors for user_rf_cal_sector_set()
-    if ( ! data_begin)
-        data_begin = data_end;
+    log_end = flash_size_b - 5u * SPI_FLASH_SEC_SIZE; // 5 sectors for user_rf_cal_sector_set()
+    if (data_begin) {
+        data_end = data_begin + max_data_size;
+        if (data_end > log_end)
+            data_end = log_end;
+    }
+    else {
+        data_begin = log_end;
+        data_end   = log_end;
+    }
 }
 
 // This function returns the index of the sector where the SDK can store its data.
@@ -237,6 +248,13 @@ int ICACHE_FLASH_ATTR write_fs(unsigned offset, const char* data, int size)
         return 1;
     }
 
+    const uint32_t data_size = data_end - data_begin;
+    if (offset > data_size || offset + size > data_size) {
+        os_printf("Error: data overflows allocated space in flash, offset 0x%08x size 0x%08x\n",
+                  offset, size);
+        return 1;
+    }
+
     int sector = (data_begin + offset) / SPI_FLASH_SEC_SIZE;
     const int end_sector = sector + ((size - 1) / SPI_FLASH_SEC_SIZE) + 1;
 
@@ -274,4 +292,180 @@ int ICACHE_FLASH_ATTR write_fs(unsigned offset, const char* data, int size)
     }
 
     return init_filesystem();
+}
+
+static config_base* cfg      = nullptr;
+static uint32_t     cfg_addr = ~0u;
+
+static uint32_t ICACHE_FLASH_ATTR calc_config_checksum(config_base* config)
+{
+    return calc_checksum(&config->checksum + 1, &config->id + (SPI_FLASH_SEC_SIZE / 4u));
+}
+
+static bool ICACHE_FLASH_ATTR read_config(uint32_t addr, config_base* config)
+{
+    if (spi_flash_read(addr, &config->id, SPI_FLASH_SEC_SIZE) != SPI_FLASH_RESULT_OK) {
+        os_printf("Error: failed to read log from 0x%08x\n", addr);
+        return false;
+    }
+
+    if (config->id == ~0u)
+        return true;
+
+    const uint32_t checksum = calc_config_checksum(config);
+
+    if (checksum != config->checksum) {
+        os_printf("Error: invalid log entry checksum 0x%08x, expected 0x%08x\n",
+                  config->checksum, checksum);
+        return false;
+    }
+
+    return true;
+}
+
+static bool ICACHE_FLASH_ATTR is_config_checksum_ok(config_base* config)
+{
+    if (config->id == ~0u)
+        return true;
+
+    const uint32_t checksum = calc_config_checksum(config);
+
+    if (checksum == config->checksum)
+        return true;
+
+    os_printf("Error: invalid log entry checksum 0x%08x, expected 0x%08x\n",
+              config->checksum, checksum);
+    return false;
+}
+
+config_base* ICACHE_FLASH_ATTR load_config()
+{
+    if (log_begin >= log_end) {
+        os_printf("Error: config area not available\n");
+        return nullptr;
+    }
+
+    if (cfg)
+        return cfg;
+
+    config_base* low  = static_cast<config_base*>(os_malloc(SPI_FLASH_SEC_SIZE));
+    config_base* mid  = static_cast<config_base*>(os_malloc(SPI_FLASH_SEC_SIZE));
+    config_base* high = static_cast<config_base*>(os_malloc(SPI_FLASH_SEC_SIZE));
+
+    class free_ptr {
+        public:
+            explicit free_ptr(config_base*& ptr) ICACHE_FLASH_ATTR : ptr_(ptr) { }
+            ~free_ptr() ICACHE_FLASH_ATTR {
+                if (ptr_)
+                    os_free(ptr_);
+            }
+        private:
+            config_base*& ptr_;
+    };
+    free_ptr free_low(low);
+    free_ptr free_mid(mid);
+    free_ptr free_high(high);
+
+    if ( ! low || ! mid || ! high) {
+        os_printf("Error: failed to allocate memory\n");
+        return nullptr;
+    }
+
+    uint32_t low_addr  = log_begin;
+    uint32_t high_addr = log_end - SPI_FLASH_SEC_SIZE;
+
+    if (!read_config(low_addr, low))
+        return nullptr;
+
+    if (low->id == ~0u) {
+        cfg      = low;
+        cfg_addr = log_end; // First entry will be saved at log_begin
+        low      = nullptr;
+        return cfg;
+    }
+
+    if (!read_config(high_addr, high))
+        return nullptr;
+
+    while (low_addr < high_addr) {
+
+        config_base* tmp;
+
+        if (high->id != ~0u && high->id > low->id) {
+            cfg      = high;
+            cfg_addr = high_addr;
+            high     = nullptr;
+            return cfg;
+        }
+
+        if (low_addr + SPI_FLASH_SEC_SIZE == high_addr)
+            break;
+
+        const uint32_t mid_addr = ((low_addr + high_addr) / (2u * SPI_FLASH_SEC_SIZE))
+                                  * SPI_FLASH_SEC_SIZE;
+
+        if (!read_config(mid_addr, mid))
+            return nullptr;
+
+        if (mid->id == ~0u || mid->id < low->id) {
+            tmp       = high;
+            high      = mid;
+            mid       = tmp;
+            high_addr = mid_addr;
+        }
+        else {
+            tmp       = low;
+            low       = mid;
+            mid       = tmp;
+            low_addr  = mid_addr;
+        }
+    }
+
+    cfg      = low;
+    cfg_addr = low_addr;
+    low      = nullptr;
+    return cfg;
+}
+
+int ICACHE_FLASH_ATTR save_config(config_base* config)
+{
+    if (!cfg) {
+        os_printf("Error: config not initialized\n");
+        return 1;
+    }
+
+    // We don't care about overflow here, because long before we reach overflow,
+    // the flash will exceed its write limit and will become unusable.  With
+    // a 4MB flash size (as in NodeMCU), we use 731 sectors for log area, which
+    // gives us roughly 7.3 million entries/writes.  With 200 writes per day
+    // the flash could last for 100 years.
+    ++config->id;
+
+    config->checksum = calc_config_checksum(config);
+
+    cfg_addr += SPI_FLASH_SEC_SIZE;
+
+    if (cfg_addr >= log_end)
+        cfg_addr = log_begin;
+
+    if (cfg_addr % SPI_FLASH_SEC_SIZE) {
+        os_printf("Error: invalid config addr 0x%08x\n", cfg_addr);
+        return 1;
+    }
+
+    os_printf("erase @0x%08x\n", cfg_addr);
+    const uint32_t sector = cfg_addr / SPI_FLASH_SEC_SIZE;
+    if (spi_flash_erase_sector(sector) != SPI_FLASH_RESULT_OK) {
+        os_printf("Error: failed to erase sector %d\n", sector);
+        return 1;
+    }
+
+    os_printf("write @0x%08x size 0x%04x\n", cfg_addr, SPI_FLASH_SEC_SIZE);
+    if (spi_flash_write(cfg_addr, &config->id, SPI_FLASH_SEC_SIZE) != SPI_FLASH_RESULT_OK) {
+        os_printf("Error: failed to write 0x%x bytes at offset 0x%x\n",
+                  SPI_FLASH_SEC_SIZE, cfg_addr);
+        return 1;
+    }
+
+    return 0;
 }
