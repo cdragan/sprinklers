@@ -9,48 +9,15 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
-// Group 1, enabled by default: 0 2 4 5
-// * GPIO 0:
-//      Beware, pulling it low will cause boot to fail, use only as output.
-// * GPIO 2:
-//      The built-in LED is also connected in addition to the
-//      external pin and is driven with LO (instead of HI).
-//      Also, gpio_init() initializes this to LO and lights up the
-//      built-in LED.
-//
-// Group 2, each pin requires explicit routing through MUX: 1 3 10 12 13 14 15
-// * Enable pin routing:
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0TXD_U, FUNC_GPIO1);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_U0RXD_U, FUNC_GPIO3);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDI_U, FUNC_GPIO12);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTCK_U, FUNC_GPIO13);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTMS_U, FUNC_GPIO14);
-//      PIN_FUNC_SELECT(PERIPHS_IO_MUX_MTDO_U, FUNC_GPIO15);
-// * GPIO1 is UART TX and destroys UART output
-//
-// Group 3, unusable GPIOs which affect system functioning: 9
-//
-// Group 4: 6 7 8 11 16
-//  ???
+enum zone_status {
+    ZONE_OFF, // TODO make DISABLED the default (0)
+    ZONE_DISABLED,
+    ZONE_ON
+};
 
-/*
- *      Initial state:
- *
- *      GPIO    State
- *      =============
- *      0       HI
- *      2       lo
- *      4       lo
- *      5       lo
- *      1       HI
- *      3       HI
- *      10      HI
- *      12      HI
- *      13      HI
- *      14      HI
- *      15      HI
- */
+constexpr int      num_zones             = 6;
+static const int   zone_gpios[num_zones] = { 14, 12, 13, 3, 10, 15 };
+static zone_status zones[num_zones]      = { };
 
 enum lohi {
     lo,
@@ -77,6 +44,27 @@ class gpio {
     private:
         int id;
 };
+
+// Either turns a specific zone OFF, or turns exactly one zone ON.
+// See README.md for zone assignments and explanation of the behavior of
+// the GPIOs.  Generally HIGH state means that a zone is OFF, which is
+// the default after boot, and LOW state means that a zone is ON.
+static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
+{
+    for (int i = 0; i < num_zones; i++) {
+        if (zones[i] == ZONE_ON && (i != zone || ! on)) {
+            os_printf("zone %d off\n", i);
+            gpio(zone_gpios[i]).write(hi);
+            zones[i] = ZONE_OFF;
+        }
+    }
+
+    if (on && zones[zone] == ZONE_OFF) {
+        os_printf("zone %d on\n", zone);
+        gpio(zone_gpios[zone]).write(lo);
+        zones[zone] = ZONE_ON;
+    }
+}
 
 static HTTPStatus ICACHE_FLASH_ATTR upload_fs(void*             conn,
                                               const text_entry& query,
@@ -171,9 +159,9 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
             ip_info ipconfig;
             if (wifi_get_ip_info(STATION_IF, &ipconfig)) {
                 os_sprintf(tmp, "\"%u.%u.%u.%u\"",
-                           ipconfig.ip.addr & 0xFFU,
-                           (ipconfig.ip.addr >> 8) & 0xFFU,
-                           (ipconfig.ip.addr >> 16) & 0xFFU,
+                           ipconfig.ip.addr & 0xFFu,
+                           (ipconfig.ip.addr >> 8) & 0xFFu,
+                           (ipconfig.ip.addr >> 16) & 0xFFu,
                            ipconfig.ip.addr >> 24);
                 print_json(tmp);
             }
@@ -198,37 +186,6 @@ static HTTPStatus ICACHE_FLASH_ATTR sysinfo(void*             conn,
     webserver_send_response(conn, response, "application/json", HTTP_HEAD_SIZE, end - HTTP_HEAD_SIZE);
 
     return HTTP_RESPONSE_SENT;
-}
-
-enum zone_status {
-    ZONE_OFF, // TODO make DISABLED the default (0)
-    ZONE_DISABLED,
-    ZONE_ON
-};
-
-constexpr int      num_zones             = 6;
-static const int   zone_gpios[num_zones] = { 14, 12, 13, 3, 10, 15 };
-static zone_status zones[num_zones]      = { };
-
-// Either turns a specific zone OFF, or turns exactly one zone ON.
-// See README.md for zone assignments and explanation of the behavior of
-// the GPIOs.  Generally HIGH state means that a zone is OFF, which is
-// the default after boot, and LOW state means that a zone is ON.
-static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
-{
-    for (int i = 0; i < num_zones; i++) {
-        if (zones[i] == ZONE_ON && (i != zone || ! on)) {
-            os_printf("zone %d off\n", i);
-            gpio(zone_gpios[i]).write(hi);
-            zones[i] = ZONE_OFF;
-        }
-    }
-
-    if (on && zones[zone] == ZONE_OFF) {
-        os_printf("zone %d on\n", zone);
-        gpio(zone_gpios[zone]).write(lo);
-        zones[zone] = ZONE_ON;
-    }
 }
 
 static HTTPStatus ICACHE_FLASH_ATTR manual(void*             conn,
@@ -277,26 +234,6 @@ static HTTPStatus ICACHE_FLASH_ATTR manual(void*             conn,
     return HTTP_OK;
 }
 
-static void ICACHE_FLASH_ATTR init_done()
-{
-    os_printf("init done\n");
-
-    configure_ntp();
-
-    static os_timer_t timer;
-    os_timer_disarm(&timer);
-    os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
-
-            const auto timestamp = sntp_get_current_timestamp();
-            if (timestamp) {
-                const auto real_time = sntp_get_real_time(timestamp);
-                os_printf("time: %s", real_time);
-            }
-        },
-        nullptr);
-    os_timer_arm(&timer, 5000, true);
-}
-
 static const handler_entry web_handlers[] = {
     { GET_METHOD,  "sysinfo",   sysinfo   },
     { POST_METHOD, "upload_fs", upload_fs },
@@ -330,5 +267,23 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
 
     configure_webserver(&web_handlers[0], sizeof(web_handlers) / sizeof(web_handlers[0]));
 
-    system_init_done_cb(init_done);
+    system_init_done_cb([]() ICACHE_FLASH_ATTR {
+
+        os_printf("init done\n");
+
+        configure_ntp();
+
+        static os_timer_t timer;
+        os_timer_disarm(&timer);
+        os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
+
+                const auto timestamp = sntp_get_current_timestamp();
+                if (timestamp) {
+                    const auto real_time = sntp_get_real_time(timestamp);
+                    os_printf("time: %s", real_time);
+                }
+            },
+            nullptr);
+        os_timer_arm(&timer, 5000, true);
+    });
 }
