@@ -63,7 +63,7 @@ Here is the zone, LED and button assignment on the NodeMCU v1.0 board:
 * GPIO1 is used for UART TX bit and so it is unusable, unless we wanted to lose
   the ability to use UART.
 * GPIO16 looks like it is unusable (but I may be wrong).
-* GPIOs 5, 4, 0, 2 have LOW state after boot and `gpio_init()` is called.
+* GPIOs 5, 4 and 2 have LOW state after `gpio_init()` is called.
   The remaining GPIOs have HIGH state.
 * GPIO2 is connected to the built-in LED (mounted close to the GPIO16 output pin).
   This built-in LED is lit when GPIO2 is in LOW state (the default after
@@ -73,6 +73,9 @@ Here is the zone, LED and button assignment on the NodeMCU v1.0 board:
 * GPIO15 momentarily comes up in LOW state right after boot and then goes to HIGH.
   This takes something like 500ms.  Because of this, we use it for zone 6,
   which is the least likely to be used.
+* GPIOs 5, 4, 0 and 2 are readily available after `gpio_init()`.  The remaining
+  GPIOs must be switched to in the MUX to connect them to the output pins, otherwise
+  they are routed to other functions.
 
 
 Physical Interface Design
