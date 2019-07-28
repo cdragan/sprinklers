@@ -296,6 +296,7 @@ int ICACHE_FLASH_ATTR write_fs(unsigned offset, const char* data, int size)
 
 static config_base* cfg      = nullptr;
 static uint32_t     cfg_addr = ~0u;
+static uint32_t     cfg_id   = ~0u;
 
 static uint32_t ICACHE_FLASH_ATTR calc_config_checksum(config_base* config)
 {
@@ -392,10 +393,11 @@ config_base* ICACHE_FLASH_ATTR load_config()
         config_base* tmp;
 
         if (high->id != ~0u && high->id > low->id) {
-            cfg      = high;
-            cfg_addr = high_addr;
-            high     = nullptr;
-            return cfg;
+            tmp      = high;
+            high     = low;
+            low      = tmp;
+            low_addr = high_addr;
+            break;
         }
 
         if (low_addr + SPI_FLASH_SEC_SIZE == high_addr)
@@ -423,6 +425,7 @@ config_base* ICACHE_FLASH_ATTR load_config()
 
     cfg      = low;
     cfg_addr = low_addr;
+    cfg_id   = cfg->id;
     low      = nullptr;
     return cfg;
 }
@@ -439,7 +442,7 @@ int ICACHE_FLASH_ATTR save_config(config_base* config)
     // a 4MB flash size (as in NodeMCU), we use 731 sectors for log area, which
     // gives us roughly 7.3 million entries/writes.  With 200 writes per day
     // the flash could last for 100 years.
-    ++config->id;
+    config->id = ++cfg_id;
 
     config->checksum = calc_config_checksum(config);
 
