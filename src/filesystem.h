@@ -12,7 +12,7 @@ struct file_entry
     uint32_t offset; // offset from the beginning of the fs
 };
 
-#define FILESYSTEM_MAGIC 0xC0DEA55A
+#define FILESYSTEM_MAGIC 0xC0DEA55Au
 
 // The root directory of the filesystem, which is stored at the beginning
 // of the first sector of the filesystem.
@@ -54,8 +54,10 @@ int write_fs(unsigned offset, const char* data, int size);
 
 struct config_base
 {
-    uint32_t id;
-    uint32_t checksum;
+    uint32_t checksum;        // checksum from next field
+    uint32_t id;              // id of the write
+    uint32_t timestamp;       // timestamp of the write
+    uint32_t first_timestamp; // first timestamp ever written
 };
 
 // Loads system log/configuration.
