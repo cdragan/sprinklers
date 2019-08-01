@@ -49,16 +49,25 @@ flash_size_map system_get_flash_size_map()
     return FLASH_SIZE_32M_MAP_512_512;
 }
 
-uint8_t flash[0x400000u];
+static constexpr unsigned num_sectors = 0x400u;
+
+static uint8_t flash[num_sectors * SPI_FLASH_SEC_SIZE];
+static uint8_t sector_status[num_sectors];
+
+enum sec_status {
+    SEC_ERASED,
+    SEC_WRITTEN
+};
 
 SpiFlashOpResult spi_flash_erase_sector(uint16_t sec)
 {
     assert(sec >= 0x100u);
-    assert(sec <  0x3FBu);
+    assert(sec <  num_sectors - 5u);
 
     // TODO mock erase failure
 
     memset(&flash[sec * 0x1000u], 0xFFu, 0x1000u);
+    sector_status[sec] = SEC_ERASED;
 
     return SPI_FLASH_RESULT_OK;
 }
@@ -66,12 +75,17 @@ SpiFlashOpResult spi_flash_erase_sector(uint16_t sec)
 SpiFlashOpResult spi_flash_write(uint32_t dst_addr, uint32_t* src_addr, uint32_t size)
 {
     assert(dst_addr >= 0x100000u);
-    assert(dst_addr + size <= 0x3FB000u);
+    assert(dst_addr + size <= (num_sectors - 5u) * SPI_FLASH_SEC_SIZE);
     assert(dst_addr % 0x1000u == 0u);
 
-    const auto end = dst_addr + ((size - 1u) & ~0xFFFu) + 0x1000u;
-    for (auto i = dst_addr; i < end; ++i)
-        assert(flash[i] == 0xFFu);
+    const auto begin_sec = dst_addr / SPI_FLASH_SEC_SIZE;
+    const auto end_sec   = ((dst_addr + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
+
+    for (auto i = begin_sec; i < end_sec; ++i) {
+        if (sector_status[i] != SEC_ERASED)
+            return SPI_FLASH_RESULT_ERR;
+        sector_status[i] = SEC_WRITTEN;
+    }
 
     // TODO mock write failure
 
@@ -83,7 +97,7 @@ SpiFlashOpResult spi_flash_write(uint32_t dst_addr, uint32_t* src_addr, uint32_t
 SpiFlashOpResult spi_flash_read(uint32_t src_addr, uint32_t* dst_addr, uint32_t size)
 {
     assert(src_addr >= 0x100000u);
-    assert(src_addr + size <= 0x3FB000u);
+    assert(src_addr + size <= (num_sectors - 5u) * SPI_FLASH_SEC_SIZE);
 
     // TODO mock read failure
 
@@ -97,23 +111,9 @@ extern "C" uint32_t user_rf_cal_sector_set();
 void mock::clear_flash()
 {
     memset(&flash, 0xFFu, sizeof(flash));
+    memset(&sector_status, SEC_ERASED, sizeof(sector_status));
 
     user_rf_cal_sector_set();
-}
-
-void mock::load_fs_from_file(const char* filename)
-{
-    FILE* file = fopen(filename, "rb");
-    if (!file) {
-        fprintf(stderr, "Error: Failed to open file %s\n", filename);
-        return;
-    }
-
-    fread(&flash[0x100000], 1, 128u * 1024u, file);
-    if (ferror(file))
-        fprintf(stderr, "Error: Failed to read from file %s\n", filename);
-
-    fclose(file);
 }
 
 static uint32_t timestamp = 0u;
@@ -196,54 +196,6 @@ static uint32_t calc_checksum(const void* buf, size_t size)
     return checksum;
 }
 
-namespace mock {
-
-    template<typename T, int N>
-    constexpr T align_up(T v)
-    {
-        return (((v - static_cast<T>(1)) / static_cast<T>(N)) * static_cast<T>(N)) + static_cast<T>(N);
-    }
-
-    class fsmaker
-    {
-        public:
-            fsmaker() = default;
-            ~fsmaker() { destroy(); }
-
-            fsmaker(const fsmaker&) = delete;
-            fsmaker& operator=(const fsmaker&) = delete;
-
-            fsmaker(fsmaker&& other)
-                : fs(other.fs), size(other.size)
-            {
-                other.fs   = nullptr;
-                other.size = 0u;
-            }
-
-            fsmaker& operator=(fsmaker&& other)
-            {
-                destroy();
-                fs         = other.fs;
-                size       = other.size;
-                other.fs   = nullptr;
-                other.size = 0u;
-                return *this;
-            }
-
-            const void* get_buffer() const { return fs; }
-            size_t get_size() const { return size; }
-
-            void construct(const file_desc* files, size_t num_files);
-
-        private:
-            void destroy();
-
-            filesystem* fs   = nullptr;
-            size_t      size = 0u;
-    };
-
-}
-
 void mock::fsmaker::construct(const file_desc* files, size_t num_files)
 {
     const size_t hdr_size = sizeof(filesystem) + (num_files - 1u) * sizeof(file_entry);
@@ -304,4 +256,8 @@ void mock::load_fs_from_memory(const file_desc* files, size_t num_files)
     const auto size = maker.get_size();
 
     memcpy(&flash[0x100000u], fs, size);
+
+    const auto begin_sec = 0x100;
+    const auto end_sec = ((0x100000u + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
+    memset(&sector_status[begin_sec], SEC_WRITTEN, end_sec - begin_sec);
 }

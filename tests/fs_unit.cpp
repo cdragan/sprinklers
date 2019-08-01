@@ -53,7 +53,7 @@ int main()
 
         static const mock::file_desc files[] = {
             { "f1", "1" },
-            { "f2", "2" },
+            { "f2", "2" }
         };
 
         mock::load_fs_from_memory(files, sizeof(files) / sizeof(files[0]));
@@ -90,6 +90,48 @@ int main()
         assert(find_file("f11") == nullptr);
 
         assert(find_file("") == nullptr);
+
+        mock::destroy_filesystem();
+    }
+
+    // Write file system, one sector
+    {
+        mock::clear_flash();
+
+        static const mock::file_desc files[] = {
+            { "empty", "" },
+            { "one", "$" },
+            { "two", "42" }
+        };
+
+        assert(init_filesystem() == 1);
+
+        {
+            mock::fsmaker maker;
+            maker.construct(files, sizeof(files) / sizeof(files[0]));
+
+            assert(write_fs(0u, static_cast<const char*>(maker.get_buffer()), maker.get_size()) == 0);
+        }
+
+        const auto empty = find_file("empty");
+        assert(empty != nullptr);
+
+        assert(load_file(empty, 0) == nullptr);
+
+        const auto one = find_file("one");
+        assert(one != nullptr);
+
+        auto buf = load_file(one, 128u);
+        assert(buf[128u] == '$');
+        free(buf);
+
+        const auto two = find_file("two");
+        assert(two != nullptr);
+
+        buf = load_file(two, 0u);
+        assert(buf[0u] == '4');
+        assert(buf[1u] == '2');
+        free(buf);
 
         mock::destroy_filesystem();
     }
