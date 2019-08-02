@@ -49,24 +49,28 @@ flash_size_map system_get_flash_size_map()
     return FLASH_SIZE_32M_MAP_512_512;
 }
 
-static constexpr unsigned num_sectors = 0x400u;
+static constexpr unsigned num_sectors  = 0x400u;
+static constexpr unsigned fs_first_sec = 0x100u;
+static constexpr unsigned tail_sectors = 5u; // Used by the SDK
 
 static uint8_t flash[num_sectors * SPI_FLASH_SEC_SIZE];
 static uint8_t sector_status[num_sectors];
 
 enum sec_status {
     SEC_ERASED,
-    SEC_WRITTEN
+    SEC_WRITTEN,
+    SEC_BAD
 };
 
 SpiFlashOpResult spi_flash_erase_sector(uint16_t sec)
 {
-    assert(sec >= 0x100u);
-    assert(sec <  num_sectors - 5u);
+    assert(sec >= fs_first_sec);
+    assert(sec <  num_sectors - tail_sectors);
 
-    // TODO mock erase failure
+    if (sector_status[sec] == SEC_BAD)
+        return SPI_FLASH_RESULT_ERR;
 
-    memset(&flash[sec * 0x1000u], 0xFFu, 0x1000u);
+    memset(&flash[sec * SPI_FLASH_SEC_SIZE], 0xFFu, SPI_FLASH_SEC_SIZE);
     sector_status[sec] = SEC_ERASED;
 
     return SPI_FLASH_RESULT_OK;
@@ -74,9 +78,9 @@ SpiFlashOpResult spi_flash_erase_sector(uint16_t sec)
 
 SpiFlashOpResult spi_flash_write(uint32_t dst_addr, uint32_t* src_addr, uint32_t size)
 {
-    assert(dst_addr >= 0x100000u);
-    assert(dst_addr + size <= (num_sectors - 5u) * SPI_FLASH_SEC_SIZE);
-    assert(dst_addr % 0x1000u == 0u);
+    assert(dst_addr >= fs_first_sec * SPI_FLASH_SEC_SIZE);
+    assert(dst_addr + size <= (num_sectors - tail_sectors) * SPI_FLASH_SEC_SIZE);
+    assert(dst_addr % SPI_FLASH_SEC_SIZE == 0u);
 
     const auto begin_sec = dst_addr / SPI_FLASH_SEC_SIZE;
     const auto end_sec   = ((dst_addr + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
@@ -87,8 +91,6 @@ SpiFlashOpResult spi_flash_write(uint32_t dst_addr, uint32_t* src_addr, uint32_t
         sector_status[i] = SEC_WRITTEN;
     }
 
-    // TODO mock write failure
-
     memcpy(&flash[dst_addr], src_addr, size);
 
     return SPI_FLASH_RESULT_OK;
@@ -96,10 +98,15 @@ SpiFlashOpResult spi_flash_write(uint32_t dst_addr, uint32_t* src_addr, uint32_t
 
 SpiFlashOpResult spi_flash_read(uint32_t src_addr, uint32_t* dst_addr, uint32_t size)
 {
-    assert(src_addr >= 0x100000u);
-    assert(src_addr + size <= (num_sectors - 5u) * SPI_FLASH_SEC_SIZE);
+    assert(src_addr >= fs_first_sec * SPI_FLASH_SEC_SIZE);
+    assert(src_addr + size <= (num_sectors - tail_sectors) * SPI_FLASH_SEC_SIZE);
 
-    // TODO mock read failure
+    const auto begin_sec = src_addr / SPI_FLASH_SEC_SIZE;
+    const auto end_sec   = ((src_addr + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
+
+    for (auto i = begin_sec; i < end_sec; ++i)
+        if (sector_status[i] == SEC_BAD)
+            return SPI_FLASH_RESULT_ERR;
 
     memcpy(dst_addr, &flash[src_addr], size);
 
@@ -255,9 +262,8 @@ void mock::load_fs_from_memory(const file_desc* files, size_t num_files)
     const auto fs = maker.get_buffer();
     const auto size = maker.get_size();
 
-    memcpy(&flash[0x100000u], fs, size);
+    memcpy(&flash[fs_first_sec * SPI_FLASH_SEC_SIZE], fs, size);
 
-    const auto begin_sec = 0x100;
-    const auto end_sec = ((0x100000u + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
-    memset(&sector_status[begin_sec], SEC_WRITTEN, end_sec - begin_sec);
+    const auto end_sec = ((fs_first_sec * SPI_FLASH_SEC_SIZE + size - 1u) / SPI_FLASH_SEC_SIZE) + 1u;
+    memset(&sector_status[fs_first_sec], SEC_WRITTEN, end_sec - fs_first_sec);
 }
