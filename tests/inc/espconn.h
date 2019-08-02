@@ -1,1 +1,4 @@
-#include "mock.h"
+#pragma once
+
+extern "C" {
+}

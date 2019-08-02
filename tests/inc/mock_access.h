@@ -1,5 +1,7 @@
+#pragma once
 
-#include "mock.h"
+#include <stddef.h>
+#include <stdint.h>
 
 struct filesystem;
 

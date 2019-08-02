@@ -1,8 +1,13 @@
 
-#include "mock.h"
 #include "mock_access.h"
 
 #include "../../src/filesystem.h"
+
+#include "mem.h"
+#include "osapi.h"
+#include "sntp.h"
+#include "spi_flash.h"
+#include "user_interface.h"
 
 #include <assert.h>
 #include <stdarg.h>
