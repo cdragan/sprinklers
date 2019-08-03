@@ -167,6 +167,41 @@ int main()
         mock::destroy_filesystem();
     }
 
+    // Write other sectors
+    {
+        mock::clear_flash();
+
+        static const char stuff[] = "stuff##";
+
+        // Filesystem not initialized, cannot write
+        assert(write_fs(0x1000u, stuff, sizeof(stuff)) == 1);
+
+        // Init some dummy filesystem
+        static const mock::file_desc files[] = {
+            { "x", "x" }
+        };
+        mock::fsmaker maker;
+        maker.construct(files, sizeof(files) / sizeof(files[0]));
+        assert(write_fs(0u, static_cast<const char*>(maker.get_buffer()), maker.get_size()) == 0);
+
+        // Write to next sector OK
+        assert(write_fs(0x1000u, stuff, sizeof(stuff)) == 0);
+
+        // Write to last sector OK
+        assert(write_fs(128u * 1024u - 0x1000u, stuff, sizeof(stuff)) == 0);
+
+        // Cannot write beyond the end of the available area
+        assert(write_fs(128u * 1024u, stuff, sizeof(stuff)) == 1);
+
+        // Bad offsets
+        assert(write_fs(0x1001u, stuff, sizeof(stuff)) == 1);
+        assert(write_fs(0x1010u, stuff, sizeof(stuff)) == 1);
+        assert(write_fs(0x1100u, stuff, sizeof(stuff)) == 1);
+        assert(write_fs(0x1F00u, stuff, sizeof(stuff)) == 1);
+
+        mock::destroy_filesystem();
+    }
+
     // Detect corruption in flash
     {
         mock::clear_flash();
@@ -376,6 +411,16 @@ int main()
         mock::destroy_filesystem();
         mock::clear_flash();
 
+        // Save some files to ensure filesystem is not affected by log
+        const uint32_t big_file_size = 128u * 1024u - sizeof(filesystem);
+        char* const big_file_contents = static_cast<char*>(malloc(big_file_size + 1));
+        memset(big_file_contents, 0xCA, big_file_size);
+        big_file_contents[big_file_size] = 0;
+        const mock::file_desc files[] = {
+            { "big", big_file_contents }
+        };
+        mock::load_fs_from_memory(files, sizeof(files) / sizeof(files[0]));
+
         // Init for the first time
         cfg = static_cast<config*>(load_config());
         constexpr uint32_t first_timestamp = 123456u;
@@ -420,6 +465,16 @@ int main()
 
         // Timestamp not set, cannot write
         assert(save_config(cfg) == 1);
+
+        // Ensure that filesystem is intact, not affected by config/log
+        assert(init_filesystem() == 0);
+        const auto big = find_file("big");
+        assert(big != nullptr);
+        const auto contents = load_file(big);
+        assert(contents != nullptr);
+        assert(memcmp(contents, big_file_contents, big_file_size) == 0);
+        free(contents);
+        free(big_file_contents);
 
         mock::destroy_filesystem();
     }
