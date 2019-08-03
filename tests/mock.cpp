@@ -215,6 +215,28 @@ void mock::run_timers()
     }
 }
 
+void mock::reboot()
+{
+    destroy_filesystem();
+
+    user_rf_cal_sector_set();
+
+    timestamp = 0u;
+
+    timers = nullptr;
+}
+
+uint16_t mock::get_flash_lifetime()
+{
+    uint16_t max_time = 0u;
+
+    for (unsigned sec = fs_first_sec; sec < num_sectors; ++sec)
+        if (sector_life[sec] > max_time)
+            max_time = sector_life[sec];
+
+    return max_time;
+}
+
 static uint32_t calc_checksum(const void* buf, size_t size)
 {
     const uint32_t* ptr = static_cast<const uint32_t*>(buf);

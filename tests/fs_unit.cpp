@@ -268,5 +268,161 @@ int main()
         mock::destroy_filesystem();
     }
 
+    struct config : public config_base
+    {
+        uint8_t  stuff[1000u - sizeof(config_base) - sizeof(uint32_t)];
+        uint32_t tail_id;
+    };
+
+    // Test log saving and loading
+    {
+        mock::clear_flash();
+
+        config* cfg = static_cast<config*>(load_config());
+        assert(cfg != nullptr);
+
+        assert(cfg->id == ~0u);
+        assert(cfg->tail_id == ~0u);
+
+        // Fail - time not set
+        assert(save_config(cfg) == 1);
+
+        // Set initial time
+        mock::set_timestamp(1);
+
+        // Initial save
+        cfg->tail_id = 0u;
+        assert(save_config(cfg) == 0);
+        assert(cfg->id == 0u);
+
+        // Reboot and reload
+        mock::reboot();
+        cfg = static_cast<config*>(load_config());
+        assert(cfg->id == 0u);
+        assert(cfg->tail_id == 0u);
+
+        // 4MB flash, 4KB per sector, 1MB for firmware, 128KB for filesystem, 5 sectors for SDK
+        constexpr uint32_t usable_log_sectors = 0x400u - 0x20u - 0x100u - 5u;
+
+        constexpr uint32_t seconds_per_day = 60u * 60u * 24u;
+
+        uint32_t used_sectors = 1u;
+
+        const auto advance = [&]() {
+            ++cfg->tail_id;
+            assert(save_config(cfg) == 0);
+            ++used_sectors;
+        };
+
+        const auto advance_with_time = [&]() {
+            mock::set_timestamp(seconds_per_day * used_sectors);
+            advance();
+        };
+
+        const auto reboot_and_verify = [&]() {
+            memset(cfg, 0, sizeof(config));
+
+            mock::reboot();
+
+            cfg = static_cast<config*>(load_config());
+            assert(cfg->tail_id + 1u == used_sectors);
+            assert(cfg->id == cfg->tail_id);
+        };
+
+        // Write half of the available log area
+        while (used_sectors < usable_log_sectors / 2u)
+            advance_with_time();
+
+        assert(cfg->first_timestamp == 1);
+        assert(cfg->tail_id + 1u == used_sectors);
+        assert(cfg->id == cfg->tail_id);
+
+        // Reboot and make sure we have the same stuff as last time
+        reboot_and_verify();
+
+        // Write two sectors and verify to make sure binary search works
+        for (int i = 0; i < 2; ++i) {
+            advance_with_time();
+            reboot_and_verify();
+        }
+
+        // Max 1 write per sector until now
+        assert(mock::get_flash_lifetime() == 1u);
+
+        // Write until we use all available sectors
+        while (used_sectors < usable_log_sectors)
+            advance_with_time();
+
+        // Reboot and make sure we have correct stuff
+        reboot_and_verify();
+
+        // Still max 1 write per sector until now
+        assert(mock::get_flash_lifetime() == 1u);
+
+        // Next write goes back to first sector
+        advance_with_time();
+        reboot_and_verify();
+
+        // Now one sector has been written 2 times
+        assert(mock::get_flash_lifetime() == 2u);
+
+        // Write a few sectors to make sure binary search works
+        for (int i = 0; i < 5; ++i) {
+            advance_with_time();
+            reboot_and_verify();
+        }
+
+        // Clear flash
+        mock::destroy_filesystem();
+        mock::clear_flash();
+
+        // Init for the first time
+        cfg = static_cast<config*>(load_config());
+        constexpr uint32_t first_timestamp = 123456u;
+        mock::set_timestamp(first_timestamp);
+        cfg->tail_id = 0u;
+        assert(save_config(cfg) == 0);
+        used_sectors = 1u;
+
+        // Write some entries
+        mock::set_timestamp(first_timestamp + 1u);
+        while (used_sectors < 402u)
+            advance();
+
+        // Cannot write anymore
+        assert(save_config(cfg) == 1);
+
+        // Can write some more after some time
+        mock::set_timestamp(first_timestamp + seconds_per_day / 2u);
+        while (used_sectors < 602u)
+            advance();
+
+        // Cannot write again
+        assert(save_config(cfg) == 1);
+
+        // Reboot
+        reboot_and_verify();
+
+        // Still cannot write after reboot
+        mock::set_timestamp(first_timestamp + seconds_per_day / 2u);
+        assert(save_config(cfg) == 1);
+
+        // Some more time passed, can write again
+        mock::set_timestamp(first_timestamp + seconds_per_day);
+        while (used_sectors < 802u)
+            advance();
+
+        // Cannot write again
+        assert(save_config(cfg) == 1);
+
+        // Reboot
+        reboot_and_verify();
+
+        // Timestamp not set, cannot write
+        assert(save_config(cfg) == 1);
+
+        mock::destroy_filesystem();
+    }
+
     return 0;
 }

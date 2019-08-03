@@ -11,7 +11,7 @@ extern "C" {
 #include "filesystem.h"
 
 constexpr uint32_t max_data_size      = 128u * 1024u;
-constexpr uint32_t max_writes_per_day = 200u;
+constexpr uint32_t max_writes_per_day = 400u;
 constexpr uint32_t sec_per_day        = 60u * 60u * 24u;
 
 static uint32_t  flash_size_b = 0u;
@@ -26,9 +26,6 @@ static filesystem* fs = nullptr;
 static config_base* cfg      = nullptr;
 static uint32_t     cfg_addr = ~0u;
 static config_base  cfg_last = { ~0u, ~0u, 0u, 0u };
-
-static uint32_t   cfg_write_delayed = 0u;
-static os_timer_t cfg_delay_timer;
 
 #ifdef UNIT_TEST
 namespace mock {
@@ -49,6 +46,7 @@ namespace mock {
         data_end     = 0u;
         log_end      = 0u;
         cfg_addr     = 0u;
+        cfg_last     = { ~0u, ~0u, 0u, 0u };
     }
 }
 #endif
@@ -452,7 +450,8 @@ bool ICACHE_FLASH_ATTR writing_too_fast(uint32_t timestamp, uint32_t first_times
     if (timestamp <= first_timestamp || id == ~0u)
         return true;
 
-    const uint32_t total_lifetime = timestamp - first_timestamp;
+    // Add sec_per_day to allow max writes on the first day
+    const uint32_t total_lifetime = timestamp - first_timestamp + sec_per_day;
 
     const uint32_t cur_writes_per_day = static_cast<uint32_t>(
             (static_cast<uint64_t>(id) * sec_per_day) / total_lifetime);
@@ -506,52 +505,21 @@ int ICACHE_FLASH_ATTR save_config(config_base* config)
         return 1;
     }
 
-    config->first_timestamp =
-        cfg_last.first_timestamp ? cfg_last.first_timestamp :
-        timestamp                ? timestamp
-                                 : 0u;
+    config->first_timestamp = cfg_last.first_timestamp ? cfg_last.first_timestamp : timestamp;
 
     // We don't care about overflow here, because long before we reach overflow,
     // the flash will exceed its write limit and will become unusable.  With
     // a 4MB flash size (as in NodeMCU), we use 731 sectors for log area, which
-    // gives us roughly 7.3 million entries/writes.  With 200 writes per day
-    // the flash could last for 100 years.
+    // gives us roughly 7.3 million entries/writes.  With 400 writes per day
+    // the flash could last for 50 years.
     config->id = cfg_last.id + 1u;
 
-    config->timestamp = timestamp;
+    config->timestamp = timestamp >= cfg_last.timestamp ? timestamp : cfg_last.timestamp;
     config->checksum  = calc_config_checksum(config);
 
-    if (timestamp && writing_too_fast(timestamp, config->first_timestamp, config->id)) {
-        if ( ! cfg_write_delayed) {
-
-            const uint32_t today = timestamp / sec_per_day;
-            cfg_write_delayed = (today + 1u) * sec_per_day;
-
-            os_timer_disarm(&cfg_delay_timer);
-            os_timer_setfn(&cfg_delay_timer, [](void*) ICACHE_FLASH_ATTR {
-
-                const uint32_t timestamp = sntp_get_current_timestamp();
-
-                if (timestamp && timestamp >= cfg_write_delayed) {
-                    os_timer_disarm(&cfg_delay_timer);
-                    cfg_write_delayed = 0u;
-
-                    if ( ! cfg)
-                        return;
-
-                    cfg->id = cfg_last.id + 1u;
-
-                    cfg->first_timestamp = cfg_last.first_timestamp;
-
-                    cfg->timestamp = timestamp;
-                    cfg->checksum  = calc_config_checksum(cfg);
-
-                    write_config_sector(cfg);
-                }
-            }, nullptr);
-            os_timer_arm(&cfg_delay_timer, 60000u, true);
-        }
-        return 0;
+    if (writing_too_fast(config->timestamp, config->first_timestamp, config->id)) {
+        os_printf("Error: writing config too fast\n");
+        return 1;
     }
 
     return write_config_sector(config);

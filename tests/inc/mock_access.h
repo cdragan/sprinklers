@@ -17,6 +17,10 @@ namespace mock {
 
     void destroy_filesystem();
 
+    void reboot();
+
+    uint16_t get_flash_lifetime();
+
     struct file_desc
     {
         const char* filename;
