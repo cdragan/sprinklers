@@ -514,6 +514,11 @@ int ICACHE_FLASH_ATTR save_config(config_base* config)
     // the flash could last for 50 years.
     config->id = cfg_last.id + 1u;
 
+    // The timestamp is a unsigned 32-bit integer.  It is the number of seconds since
+    // 1-1-1970.  Therefore it will not overflow until 2106.  The flash will probably
+    // die before then.
+    // Note that we don't allow timestamps to go back, so if someone spoofs NTP, we will
+    // still reach daily write limit and we won't kill the flash.
     config->timestamp = timestamp >= cfg_last.timestamp ? timestamp : cfg_last.timestamp;
     config->checksum  = calc_config_checksum(config);
 
