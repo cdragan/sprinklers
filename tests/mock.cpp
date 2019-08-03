@@ -57,9 +57,11 @@ flash_size_map system_get_flash_size_map()
 static constexpr unsigned num_sectors  = 0x400u;
 static constexpr unsigned fs_first_sec = 0x100u;
 static constexpr unsigned tail_sectors = 5u; // Used by the SDK
+static constexpr uint16_t sec_lifetime = 10000u;
 
-static uint8_t flash[num_sectors * SPI_FLASH_SEC_SIZE];
-static uint8_t sector_status[num_sectors];
+static uint8_t  flash[num_sectors * SPI_FLASH_SEC_SIZE];
+static uint8_t  sector_status[num_sectors];
+static uint16_t sector_life[num_sectors];
 
 enum sec_status {
     SEC_ERASED,
@@ -72,8 +74,12 @@ SpiFlashOpResult spi_flash_erase_sector(uint16_t sec)
     assert(sec >= fs_first_sec);
     assert(sec <  num_sectors - tail_sectors);
 
-    if (sector_status[sec] == SEC_BAD)
+    if (sector_life[sec] >= sec_lifetime || sector_status[sec] == SEC_BAD) {
+        sector_status[sec] = SEC_BAD;
         return SPI_FLASH_RESULT_ERR;
+    }
+
+    ++sector_life[sec];
 
     memset(&flash[sec * SPI_FLASH_SEC_SIZE], 0xFFu, SPI_FLASH_SEC_SIZE);
     sector_status[sec] = SEC_ERASED;
@@ -124,8 +130,23 @@ void mock::clear_flash()
 {
     memset(&flash, 0xFFu, sizeof(flash));
     memset(&sector_status, SEC_ERASED, sizeof(sector_status));
+    memset(&sector_life, 0u, sizeof(sector_life));
 
     user_rf_cal_sector_set();
+}
+
+uint8_t mock::modify_filesystem(uint32_t offset, uint8_t value)
+{
+    assert(offset / SPI_FLASH_SEC_SIZE < num_sectors - tail_sectors - fs_first_sec);
+
+    const uint32_t sec = offset / SPI_FLASH_SEC_SIZE + fs_first_sec;
+    assert(sector_status[sec] == SEC_WRITTEN);
+
+    offset += fs_first_sec * SPI_FLASH_SEC_SIZE;
+
+    const uint8_t old_val = flash[offset];
+    flash[offset] = value;
+    return old_val;
 }
 
 static uint32_t timestamp = 0u;

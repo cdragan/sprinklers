@@ -13,6 +13,8 @@ namespace mock {
 
     void clear_flash();
 
+    uint8_t modify_filesystem(uint32_t offset, uint8_t value);
+
     void destroy_filesystem();
 
     struct file_desc
@@ -55,7 +57,7 @@ namespace mock {
                 return *this;
             }
 
-            const void* get_buffer() const { return fs; }
+            void* get_buffer() const { return fs; }
             size_t get_size() const { return size; }
 
             void construct(const file_desc* files, size_t num_files);
