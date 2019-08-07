@@ -6,6 +6,7 @@ extern "C" {
 #include "espconn.h"
 #include "mem.h"
 #include "sntp.h"
+#include "spi_flash.h"
 }
 
 #include "filesystem.h"
@@ -260,7 +261,7 @@ text_entry ICACHE_FLASH_ATTR get_header(const text_entry& headers,
             break;
     }
 
-    return text_entry{begin, end - begin};
+    return text_entry{begin, static_cast<int>(end - begin)};
 }
 
 struct saved_conn_t {
@@ -428,7 +429,7 @@ static HTTPStatus ICACHE_FLASH_ATTR handle_request(espconn*          conn,
                     return err;
                 }
 
-                if (clen != payload.len) {
+                if (static_cast<int>(clen) != payload.len) {
                     os_printf("Error: incorrect payload length, header says %u but it is %d\n",
                               clen, payload.len);
                     return HTTP_BAD_REQUEST;
@@ -726,7 +727,7 @@ static void ICACHE_FLASH_ATTR webserver_recv(void* arg, char* pusrdata, unsigned
         webserver_send_error(conn, HTTP_BAD_REQUEST);
 }
 
-static void ICACHE_FLASH_ATTR webserver_reconnect(void* arg, sint8 err)
+static void ICACHE_FLASH_ATTR webserver_reconnect(void* arg, int8_t err)
 {
     espconn* const conn = static_cast<espconn*>(arg);
 
