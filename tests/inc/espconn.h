@@ -15,8 +15,8 @@ struct mdns_info {
 };
 
 struct esp_tcp {
-    int remote_port;
-    int local_port;
+    int     remote_port;
+    int     local_port;
     uint8_t local_ip[4];
     uint8_t remote_ip[4];
 };
