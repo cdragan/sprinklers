@@ -3,6 +3,7 @@
 
 #include "../../src/filesystem.h"
 
+#include "espconn.h"
 #include "mem.h"
 #include "osapi.h"
 #include "sntp.h"
@@ -27,6 +28,18 @@ int os_printf(const char* format, ...)
     return ret;
 }
 
+int os_sprintf(char* str, const char* format, ...)
+{
+    va_list args;
+    va_start(args, format);
+
+    const int ret = vsprintf(str, format, args);
+
+    va_end(args);
+
+    return ret;
+}
+
 void* os_malloc(size_t size)
 {
     return malloc(size);
@@ -37,6 +50,11 @@ void os_free(void* ptr)
     free(ptr);
 }
 
+int os_strlen(const char* s)
+{
+    return strlen(s);
+}
+
 int os_strncmp(const char* s1, const char* s2, unsigned int n)
 {
     return strncmp(s1, s2, n);
@@ -45,6 +63,26 @@ int os_strncmp(const char* s1, const char* s2, unsigned int n)
 void* os_memcpy(void* dest, const void* src, unsigned int n)
 {
     return memcpy(dest, src, n);
+}
+
+void* os_memmove(void* dest, const void* src, unsigned int n)
+{
+    return memmove(dest, src, n);
+}
+
+int os_memcmp(const void* s1, const void* s2, unsigned int n)
+{
+    return memcmp(s1, s2, n);
+}
+
+int os_strcmp(const char* s1, const char* s2)
+{
+    return strcmp(s1, s2);
+}
+
+char* os_strstr(const char* s1, const char* s2)
+{
+    return const_cast<char*>(strstr(s1, s2));
 }
 
 // Note: values below are hardcoded for NodeMCU 1.0
@@ -62,6 +100,9 @@ static constexpr uint16_t sec_lifetime = 10000u;
 static uint8_t  flash[num_sectors * SPI_FLASH_SEC_SIZE];
 static uint8_t  sector_status[num_sectors];
 static uint16_t sector_life[num_sectors];
+
+static uint32_t timestamp = 0u;
+static int8_t   timezone  = 8;
 
 enum sec_status {
     SEC_ERASED,
@@ -132,6 +173,9 @@ void mock::clear_flash()
     memset(&sector_status, SEC_ERASED, sizeof(sector_status));
     memset(&sector_life, 0u, sizeof(sector_life));
 
+    timestamp = 0u;
+    timezone  = 8;
+
     user_rf_cal_sector_set();
 }
 
@@ -149,11 +193,23 @@ uint8_t mock::modify_filesystem(uint32_t offset, uint8_t value)
     return old_val;
 }
 
-static uint32_t timestamp = 0u;
-
 void mock::set_timestamp(uint32_t new_timestamp)
 {
     timestamp = new_timestamp;
+}
+
+void sntp_init()
+{
+}
+
+void sntp_setservername(unsigned char, char*)
+{
+}
+
+bool sntp_set_timezone(int8_t new_timezone)
+{
+    timezone = new_timezone;
+    return timezone;
 }
 
 uint32_t sntp_get_current_timestamp()
@@ -213,6 +269,103 @@ void mock::run_timers()
 
         timer = next;
     }
+}
+
+bool wifi_station_connect()
+{
+    return true;
+}
+
+bool wifi_get_ip_info(interface_t if_index, ip_info* info)
+{
+    assert(if_index == STATION_IF);
+    assert(info);
+    return true;
+}
+
+op_mode_t wifi_get_opmode()
+{
+    return STATION_MODE;
+}
+
+bool wifi_set_opmode(op_mode_t opmode)
+{
+    assert(opmode == STATION_MODE);
+    return true;
+}
+
+conn_status_t wifi_station_get_connect_status()
+{
+    return STATION_GOT_IP;
+}
+
+bool wifi_wps_disable()
+{
+    return true;
+}
+
+bool wifi_wps_enable(wps_type_t wps_type)
+{
+    assert(wps_type == WPS_TYPE_PBC);
+    return true;
+}
+
+bool wifi_wps_start()
+{
+    return true;
+}
+
+bool wifi_set_wps_cb(wps_st_cb_t cb)
+{
+    assert(cb);
+    return true;
+}
+
+void espconn_mdns_init(mdns_info* info)
+{
+    assert(info);
+}
+
+int8_t espconn_accept(espconn* conn)
+{
+    assert(conn);
+    return 0;
+}
+
+int8_t espconn_send(espconn* conn, uint8_t* psent, uint16_t length)
+{
+    assert(conn);
+    assert(psent);
+    assert(length);
+    return 0;
+}
+
+int8_t espconn_regist_recvcb(espconn* conn, espconn_recv_callback cb)
+{
+    assert(conn);
+    assert(cb);
+    return 0;
+}
+
+int8_t espconn_regist_reconcb(espconn* conn, espconn_reconnect_callback cb)
+{
+    assert(conn);
+    assert(cb);
+    return 0;
+}
+
+int8_t espconn_regist_connectcb(espconn* conn, espconn_connect_callback cb)
+{
+    assert(conn);
+    assert(cb);
+    return 0;
+}
+
+int8_t espconn_regist_disconcb(espconn* conn, espconn_connect_callback cb)
+{
+    assert(conn);
+    assert(cb);
+    return 0;
 }
 
 void mock::reboot()

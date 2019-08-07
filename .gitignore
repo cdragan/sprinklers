@@ -5,3 +5,5 @@
 .gcc-flags.json
 .*.swp
 fs.bin
+fs_unit
+fs_unit.dSYM
