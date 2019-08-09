@@ -4,8 +4,11 @@
 #include <assert.h>
 #include <string.h>
 
-int main()
+int main(int argc, char* argv[])
 {
+    if (mock::set_args(argc, argv))
+        return 1;
+
     // Init empty filesystem
     {
         mock::clear_flash();

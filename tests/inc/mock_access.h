@@ -7,6 +7,8 @@ struct filesystem;
 
 namespace mock {
 
+    int set_args(int argc, char* argv[]);
+
     void set_timestamp(uint32_t new_timestamp);
 
     void run_timers();

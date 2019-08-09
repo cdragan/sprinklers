@@ -16,12 +16,62 @@
 #include <stdlib.h>
 #include <string.h>
 
+namespace {
+    class Output {
+        public:
+            Output() = default;
+
+            void set_output(FILE* f) {
+                output = f;
+                set = true;
+            }
+
+            ~Output() {
+                if (set)
+                    fclose(output);
+            }
+
+            operator FILE*() const {
+                return output;
+            }
+
+        private:
+            FILE* output = stdout;
+            bool  set    = false;
+    };
+
+    static Output output;
+}
+
+int mock::set_args(int argc, char* argv[])
+{
+    if (argc < 2)
+        return 0;
+
+    if (argc > 2) {
+        fprintf(stderr, "Error: Invalid parameters\n");
+        fprintf(stderr, "Only one parameter is allowed - name of the file for UART output\n");
+        return 1;
+    }
+
+    FILE* f = fopen(argv[1], "w+");
+
+    if (!f) {
+        perror(nullptr);
+        return 1;
+    }
+
+    output.set_output(f);
+
+    return 0;
+}
+
 int os_printf(const char* format, ...)
 {
     va_list args;
     va_start(args, format);
 
-    const int ret = vprintf(format, args);
+    const int ret = vfprintf(output, format, args);
 
     va_end(args);
 

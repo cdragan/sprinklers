@@ -26,4 +26,7 @@ endif
 sysinfo:
 	curl http://$(ip)/sysinfo
 
-.PHONY: build upload monitor upload_and_monitor upload_fs sysinfo
+test:
+	$(MAKE) -C tests test
+
+.PHONY: build upload monitor upload_and_monitor upload_fs sysinfo test
