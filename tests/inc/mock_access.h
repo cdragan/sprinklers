@@ -31,6 +31,43 @@ namespace mock {
 
     void load_fs_from_memory(const file_desc* files, size_t num_files);
 
+    class buffer {
+        public:
+            buffer() = default;
+            ~buffer();
+            buffer(const buffer&) = delete;
+            buffer& operator=(const buffer&) = delete;
+            buffer(buffer&& b): data_(b.data_), size_(b.size_) {
+                b.data_ = nullptr;
+                b.size_ = 0;
+            }
+            buffer& operator=(buffer&& b) {
+                data_ = b.data_;
+                size_ = b.size_;
+                b.data_ = nullptr;
+                b.size_ = 0;
+                return *this;
+            }
+
+            void resize(size_t new_size);
+            size_t size() const { return size_; }
+
+            const char* data() const { return data_; }
+            char* data()             { return data_; }
+            const char* begin() const { return data_; }
+            char* begin()             { return data_; }
+            const char* end() const { return data_ + size_; }
+            char* end()             { return data_ + size_; }
+
+        private:
+            char*  data_ = nullptr;
+            size_t size_ = 0;
+    };
+
+    void send_http(const char* request, size_t request_size, buffer* response);
+    void send_http(const char* request, buffer* response);
+    void send_http(const buffer& request, buffer* response);
+
     template<typename T, int N>
     constexpr T align_up(T v)
     {

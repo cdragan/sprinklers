@@ -154,6 +154,11 @@ static uint16_t sector_life[num_sectors];
 static uint32_t timestamp = 0u;
 static int8_t   timezone  = 8;
 
+static wps_st_cb_t   wps_callback  = nullptr;
+static espconn       accept_conn;
+static bool          accept_called = false;
+static mock::buffer* recv_buf      = nullptr;
+
 enum sec_status {
     SEC_ERASED,
     SEC_WRITTEN,
@@ -223,8 +228,10 @@ void mock::clear_flash()
     memset(&sector_status, SEC_ERASED, sizeof(sector_status));
     memset(&sector_life, 0u, sizeof(sector_life));
 
-    timestamp = 0u;
-    timezone  = 8;
+    timestamp     = 0u;
+    timezone      = 8;
+    wps_callback  = nullptr;
+    accept_called = false;
 
     user_rf_cal_sector_set();
 }
@@ -351,6 +358,7 @@ conn_status_t wifi_station_get_connect_status()
 
 bool wifi_wps_disable()
 {
+    wps_callback = nullptr;
     return true;
 }
 
@@ -362,12 +370,16 @@ bool wifi_wps_enable(wps_type_t wps_type)
 
 bool wifi_wps_start()
 {
+    assert(wps_callback);
+    wps_callback(WPS_CB_ST_SUCCESS);
     return true;
 }
 
 bool wifi_set_wps_cb(wps_st_cb_t cb)
 {
     assert(cb);
+    assert(!wps_callback);
+    wps_callback = cb;
     return true;
 }
 
@@ -379,6 +391,12 @@ void espconn_mdns_init(mdns_info* info)
 int8_t espconn_accept(espconn* conn)
 {
     assert(conn);
+    assert(!accept_called);
+    accept_conn = *conn;
+    accept_called = true;
+    accept_conn.proto.recv_cb       = nullptr;
+    accept_conn.proto.reconnect_cb  = nullptr;
+    accept_conn.proto.disconnect_cb = nullptr;
     return 0;
 }
 
@@ -387,6 +405,11 @@ int8_t espconn_send(espconn* conn, uint8_t* psent, uint16_t length)
     assert(conn);
     assert(psent);
     assert(length);
+    assert(recv_buf);
+
+    const size_t pos = recv_buf->size();
+    recv_buf->resize(pos + length);
+    memcpy(recv_buf->data() + pos, psent, length);
     return 0;
 }
 
@@ -394,6 +417,7 @@ int8_t espconn_regist_recvcb(espconn* conn, espconn_recv_callback cb)
 {
     assert(conn);
     assert(cb);
+    conn->proto.recv_cb = cb;
     return 0;
 }
 
@@ -401,6 +425,7 @@ int8_t espconn_regist_reconcb(espconn* conn, espconn_reconnect_callback cb)
 {
     assert(conn);
     assert(cb);
+    conn->proto.reconnect_cb = cb;
     return 0;
 }
 
@@ -408,6 +433,7 @@ int8_t espconn_regist_connectcb(espconn* conn, espconn_connect_callback cb)
 {
     assert(conn);
     assert(cb);
+    conn->proto.connect_cb = cb;
     return 0;
 }
 
@@ -415,7 +441,74 @@ int8_t espconn_regist_disconcb(espconn* conn, espconn_connect_callback cb)
 {
     assert(conn);
     assert(cb);
+    conn->proto.disconnect_cb = cb;
     return 0;
+}
+
+mock::buffer::~buffer()
+{
+    if (data_)
+        free(data_);
+}
+
+void mock::buffer::resize(size_t new_size)
+{
+    if (new_size == 0) {
+        if (data_)
+            free(data_);
+    }
+    else if (new_size != size_) {
+        if (data_)
+            data_ = static_cast<char*>(realloc(data_, new_size));
+        else
+            data_ = static_cast<char*>(malloc(new_size));
+    }
+    size_ = new_size;
+}
+
+void mock::send_http(const char* request, size_t request_size, buffer* response)
+{
+    assert(accept_called);
+    assert(response);
+
+    espconn conn = accept_conn;
+
+    conn.proto.connect_cb(&conn);
+
+    constexpr size_t block_size = 1400;
+    char send_buf[block_size];
+
+    assert(!recv_buf);
+    recv_buf = response;
+
+    while (request_size) {
+        const size_t send_size = request_size > block_size ? block_size : request_size;
+
+        memcpy(send_buf, request, send_size);
+
+        conn.proto.recv_cb(&conn, send_buf, static_cast<int>(send_size));
+
+        request      += send_size;
+        request_size -= send_size;
+
+        // TODO handle 100-continue
+        if (response->size())
+            break;
+    }
+
+    recv_buf = nullptr;
+
+    conn.proto.disconnect_cb(&conn);
+}
+
+void mock::send_http(const char* request, buffer* response)
+{
+    send_http(request, strlen(request), response);
+}
+
+void mock::send_http(const buffer& request, buffer* response)
+{
+    send_http(request.data(), request.size(), response);
 }
 
 void mock::reboot()
@@ -424,9 +517,10 @@ void mock::reboot()
 
     user_rf_cal_sector_set();
 
-    timestamp = 0u;
-
-    timers = nullptr;
+    timestamp     = 0u;
+    timers        = nullptr;
+    wps_callback  = nullptr;
+    accept_called = false;
 }
 
 uint16_t mock::get_flash_lifetime()

@@ -1,7 +1,7 @@
 
 cpp_files  = mock.cpp
 cpp_files += ../src/filesystem.cpp
-#cpp_files += ../src/webserver.cpp
+cpp_files += ../src/webserver.cpp
 
 all_tests = fs_unit
 

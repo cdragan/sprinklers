@@ -29,17 +29,21 @@ enum espconn_state {
     ESPCONN_NONE = 0x626
 };
 
-struct espconn {
-    espconn_type type;
-    espconn_state state;
-    struct {
-        esp_tcp* tcp;
-    } proto;
-};
-
 typedef void (*espconn_connect_callback)(void* arg);
 typedef void (*espconn_reconnect_callback)(void* arg, int8_t err);
 typedef void (*espconn_recv_callback)(void* arg, char* pdata, unsigned short len);
+
+struct espconn {
+    espconn_type  type;
+    espconn_state state;
+    struct {
+        esp_tcp*                   tcp;
+        espconn_connect_callback   connect_cb;
+        espconn_connect_callback   disconnect_cb;
+        espconn_reconnect_callback reconnect_cb;
+        espconn_recv_callback      recv_cb;
+    } proto;
+};
 
 void espconn_mdns_init(mdns_info* info);
 int8_t espconn_accept(espconn* espconn);
