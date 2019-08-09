@@ -13,8 +13,6 @@ int main(int argc, char* argv[])
     {
         mock::clear_flash();
 
-        //mock::load_fs_from_file("../fs.bin");
-
         assert(init_filesystem() == 1);
 
         mock::destroy_filesystem();
