@@ -9,10 +9,104 @@ extern "C" {
 #include "filesystem.h"
 #include "webserver.h"
 
-enum zone_status {
-    ZONE_OFF, // TODO make DISABLED the default (0)
+enum zone_order {
     ZONE_DISABLED,
-    ZONE_ON
+    ZONE_1,
+    ZONE_2,
+    ZONE_3,
+    ZONE_4,
+    ZONE_5,
+    ZONE_6
+
+    // A zone which is not configured has no name
+};
+
+enum days_of_watering {
+    DAY_MONDAY    = 1,
+    DAY_TUESDAY   = 2,
+    DAY_WEDNESDAY = 4,
+    DAY_THURSDAY  = 8,
+    DAY_FRIDAY    = 16,
+    DAY_SATURDAY  = 32,
+    DAY_SUNDAY    = 64
+};
+
+struct zone_settings {
+    // 'order' is used to sort the zones, i.e. says in which order zones
+    // will be watered.
+    zone_order order    : 3;
+    // 'time_min' says how long a zone will be watered, in minutes.
+    uint8_t    time_min : 6;
+    uint8_t    days     : 7;
+    // 'dow' is days of week.  If true, days is a bitmask saying on which
+    // days watering occurs.  If false, days is just a number saying
+    // that watering occurs every N days, where 0 means disabled,
+    // 1 means every day, 2 means every other day, etc.
+    bool       dow      : 1;
+    char       name[22];
+};
+
+struct config_settings : public config_base {
+    zone_settings zones[6];
+};
+
+enum log_code {
+    LOG_ZONE1_AUTO_START,
+    LOG_ZONE2_AUTO_START,
+    LOG_ZONE3_AUTO_START,
+    LOG_ZONE4_AUTO_START,
+    LOG_ZONE5_AUTO_START,
+    LOG_ZONE6_AUTO_START,
+
+    LOG_ZONE1_AUTO_END,
+    LOG_ZONE2_AUTO_END,
+    LOG_ZONE3_AUTO_END,
+    LOG_ZONE4_AUTO_END,
+    LOG_ZONE5_AUTO_END,
+    LOG_ZONE6_AUTO_END,
+
+    LOG_ZONE1_MANUAL_START,
+    LOG_ZONE2_MANUAL_START,
+    LOG_ZONE3_MANUAL_START,
+    LOG_ZONE4_MANUAL_START,
+    LOG_ZONE5_MANUAL_START,
+    LOG_ZONE6_MANUAL_START,
+
+    LOG_ZONE1_MANUAL_END,
+    LOG_ZONE2_MANUAL_END,
+    LOG_ZONE3_MANUAL_END,
+    LOG_ZONE4_MANUAL_END,
+    LOG_ZONE5_MANUAL_END,
+    LOG_ZONE6_MANUAL_END,
+
+    LOG_BOOT_POWER_ON,
+    LOG_BOOT_WATCHDOG,
+    LOG_BOOT_EXCEPTION,
+    LOG_BOOT_SOFT_WATCHDOG,
+    LOG_BOOT_SOFT_RESET,
+    LOG_BOOT_DEEP_SLEEP_AWAKE,
+    LOG_BOOT_EXT_RESET
+};
+
+struct log_entry {
+    uint32_t timestamp;
+    log_code event;
+};
+
+constexpr size_t config_size = 0x1000;
+
+struct config : public config_settings {
+    log_entry log[(config_size - sizeof(config_settings)) / sizeof(log_entry)];
+};
+
+static_assert(sizeof(config) == config_size, "Incorrect config size");
+
+static config* cfg = nullptr;
+
+enum zone_status {
+    XZONE_OFF,
+    XZONE_DISABLED,
+    XZONE_ON
 };
 
 constexpr int      num_zones             = 6;
@@ -45,6 +139,11 @@ class gpio {
         int id;
 };
 
+static void ICACHE_FLASH_ATTR set_critical_error()
+{
+    // TODO turn on red LED to indicate critical error
+}
+
 // Either turns a specific zone OFF, or turns exactly one zone ON.
 // See README.md for zone assignments and explanation of the behavior of
 // the GPIOs.  Generally HIGH state means that a zone is OFF, which is
@@ -52,17 +151,17 @@ class gpio {
 static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
 {
     for (int i = 0; i < num_zones; i++) {
-        if (zones[i] == ZONE_ON && (i != zone || ! on)) {
+        if (zones[i] == XZONE_ON && (i != zone || ! on)) {
             os_printf("zone %d off\n", i);
             gpio(zone_gpios[i]).write(hi);
-            zones[i] = ZONE_OFF;
+            zones[i] = XZONE_OFF;
         }
     }
 
-    if (on && zones[zone] == ZONE_OFF) {
+    if (on && zones[zone] == XZONE_OFF) {
         os_printf("zone %d on\n", zone);
         gpio(zone_gpios[zone]).write(lo);
-        zones[zone] = ZONE_ON;
+        zones[zone] = XZONE_ON;
     }
 }
 
@@ -224,7 +323,7 @@ static HTTPStatus ICACHE_FLASH_ATTR manual(void*             conn,
 
     const int zone = zone_char - '1';
 
-    if (zones[zone] == ZONE_DISABLED) {
+    if (zones[zone] == XZONE_DISABLED) {
         os_printf("Error: zone %d is disabled\n", zone);
         return HTTP_BAD_REQUEST;
     }
@@ -261,9 +360,15 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
     gpio(10).init_output(hi);
 
-    init_filesystem();
+    cfg = static_cast<config*>(load_config());
 
-    // TODO read config
+    if (!cfg) {
+        os_printf("Error: failed to read configuration!\n");
+        set_critical_error();
+        return;
+    }
+
+    init_filesystem();
 
     configure_webserver(&web_handlers[0], sizeof(web_handlers) / sizeof(web_handlers[0]));
 
