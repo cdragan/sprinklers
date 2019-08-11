@@ -3,7 +3,8 @@ cpp_files  = mock.cpp
 cpp_files += ../src/filesystem.cpp
 cpp_files += ../src/webserver.cpp
 
-all_tests = fs_unit
+all_tests  = fs_unit
+all_tests += webserver_unit
 
 output_dir = ../.pio/build/tests
 

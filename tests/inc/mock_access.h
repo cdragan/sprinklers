@@ -50,6 +50,7 @@ namespace mock {
             }
 
             void resize(size_t new_size);
+            void clear() { resize(0); }
             size_t size() const { return size_; }
 
             const char* data() const { return data_; }

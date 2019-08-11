@@ -454,8 +454,10 @@ mock::buffer::~buffer()
 void mock::buffer::resize(size_t new_size)
 {
     if (new_size == 0) {
-        if (data_)
+        if (data_) {
             free(data_);
+            data_ = nullptr;
+        }
     }
     else if (new_size != size_) {
         if (data_)
