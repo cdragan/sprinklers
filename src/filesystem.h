@@ -44,6 +44,8 @@ const file_entry* find_file(const char* filename);
 // Upon failure (e.g. when data in flash is corrupted), returns nullptr.
 char* load_file(const file_entry* file, int size_in_front = 0);
 
+constexpr uint32_t max_fs_size = 128u * 1024u;
+
 // Write data to the filesystem.
 // - offset - offset from the beginning of the file system
 // - data   - pointer to bytes to write

@@ -4,6 +4,8 @@
 #include <assert.h>
 #include <string.h>
 
+constexpr uint32_t sec_size = 0x1000u;
+
 int main(int argc, char* argv[])
 {
     if (mock::set_args(argc, argv))
@@ -175,7 +177,7 @@ int main(int argc, char* argv[])
         static const char stuff[] = "stuff##";
 
         // Filesystem not initialized, cannot write
-        assert(write_fs(0x1000u, stuff, sizeof(stuff)) == 1);
+        assert(write_fs(sec_size, stuff, sizeof(stuff)) == 1);
 
         // Init some dummy filesystem
         static const mock::file_desc files[] = {
@@ -186,13 +188,13 @@ int main(int argc, char* argv[])
         assert(write_fs(0u, static_cast<const char*>(maker.get_buffer()), maker.get_size()) == 0);
 
         // Write to next sector OK
-        assert(write_fs(0x1000u, stuff, sizeof(stuff)) == 0);
+        assert(write_fs(sec_size, stuff, sizeof(stuff)) == 0);
 
         // Write to last sector OK
-        assert(write_fs(128u * 1024u - 0x1000u, stuff, sizeof(stuff)) == 0);
+        assert(write_fs(max_fs_size - sec_size, stuff, sizeof(stuff)) == 0);
 
         // Cannot write beyond the end of the available area
-        assert(write_fs(128u * 1024u, stuff, sizeof(stuff)) == 1);
+        assert(write_fs(max_fs_size, stuff, sizeof(stuff)) == 1);
 
         // Bad offsets
         assert(write_fs(0x1001u, stuff, sizeof(stuff)) == 1);
@@ -306,7 +308,7 @@ int main(int argc, char* argv[])
 
     struct config : public config_base
     {
-        uint8_t  stuff[1000u - sizeof(config_base) - sizeof(uint32_t)];
+        uint8_t  stuff[sec_size - sizeof(config_base) - sizeof(uint32_t)];
         uint32_t tail_id;
     };
 
@@ -338,7 +340,7 @@ int main(int argc, char* argv[])
         assert(cfg->tail_id == 0u);
 
         // 4MB flash, 4KB per sector, 1MB for firmware, 128KB for filesystem, 5 sectors for SDK
-        constexpr uint32_t usable_log_sectors = 0x400u - 0x20u - 0x100u - 5u;
+        constexpr uint32_t usable_log_sectors = 0x400u - (max_fs_size / sec_size) - 0x100u - 5u;
 
         constexpr uint32_t seconds_per_day = 60u * 60u * 24u;
 
@@ -413,7 +415,7 @@ int main(int argc, char* argv[])
         mock::clear_flash();
 
         // Save some files to ensure filesystem is not affected by log
-        const uint32_t big_file_size = 128u * 1024u - sizeof(filesystem);
+        const uint32_t big_file_size = max_fs_size - sizeof(filesystem);
         char* const big_file_contents = static_cast<char*>(malloc(big_file_size + 1));
         memset(big_file_contents, 0xCA, big_file_size);
         big_file_contents[big_file_size] = 0;

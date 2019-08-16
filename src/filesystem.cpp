@@ -10,7 +10,6 @@ extern "C" {
 
 #include "filesystem.h"
 
-constexpr uint32_t max_data_size      = 128u * 1024u;
 constexpr uint32_t max_writes_per_day = 400u;
 constexpr uint32_t sec_per_day        = 60u * 60u * 24u;
 
@@ -114,7 +113,7 @@ static void ICACHE_FLASH_ATTR configure_flash()
 
     log_end = flash_size_b - 5u * SPI_FLASH_SEC_SIZE; // 5 sectors for user_rf_cal_sector_set()
     if (data_begin) {
-        data_end = data_begin + max_data_size;
+        data_end = data_begin + max_fs_size;
         if (data_end > log_end)
             data_end = log_end;
     }
