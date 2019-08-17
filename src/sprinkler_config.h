@@ -100,3 +100,8 @@ struct config : public config_settings {
 
 static_assert(sizeof(config) <= config_size, "Incorrect config size");
 static_assert(config_size - sizeof(config) < sizeof(log_entry), "Incorrect config size");
+
+// Logs a specific event.
+//
+// Returns true on success and false on failure.
+bool log_event(log_code event);
