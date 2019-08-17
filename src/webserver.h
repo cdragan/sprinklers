@@ -1,6 +1,5 @@
 
-#ifndef WEBSERVER_H_INCLUDED
-#define WEBSERVER_H_INCLUDED
+#pragma once
 
 #define HTTP_HEAD_SIZE 80
 
@@ -58,5 +57,3 @@ void webserver_send_response(void*       conn,
                              const char* mime_type,
                              int         head_room,
                              int         payload_size);
-
-#endif

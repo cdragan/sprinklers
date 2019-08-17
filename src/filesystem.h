@@ -1,6 +1,5 @@
 
-#ifndef FILESYSTEM_H_INCLUDED
-#define FILESYSTEM_H_INCLUDED
+#pragma once
 
 #include "c_types.h"
 
@@ -109,5 +108,3 @@ config_base* load_config(int idx = 0);
 //
 // Returns 0 if the write was successful or 1 if write failed.
 int save_config(config_base* config);
-
-#endif
