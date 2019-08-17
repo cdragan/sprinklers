@@ -312,6 +312,13 @@ int main(int argc, char* argv[])
         uint32_t tail_id;
     };
 
+    static_assert(sizeof(config) == sec_size, "Size of config struct is invalid");
+
+    // 4MB flash, 4KB per sector, 1MB for firmware, 128KB for filesystem, 5 sectors for SDK
+    constexpr uint32_t usable_log_sectors = 0x400u - (max_fs_size / sec_size) - 0x100u - 5u;
+
+    constexpr uint32_t seconds_per_day = 60u * 60u * 24u;
+
     // Test log saving and loading
     {
         mock::clear_flash();
@@ -338,11 +345,6 @@ int main(int argc, char* argv[])
         cfg = static_cast<config*>(load_config());
         assert(cfg->id == 0u);
         assert(cfg->tail_id == 0u);
-
-        // 4MB flash, 4KB per sector, 1MB for firmware, 128KB for filesystem, 5 sectors for SDK
-        constexpr uint32_t usable_log_sectors = 0x400u - (max_fs_size / sec_size) - 0x100u - 5u;
-
-        constexpr uint32_t seconds_per_day = 60u * 60u * 24u;
 
         uint32_t used_sectors = 1u;
 
@@ -478,6 +480,59 @@ int main(int argc, char* argv[])
         assert(memcmp(contents, big_file_contents, big_file_size) == 0);
         free(contents);
         free(big_file_contents);
+
+        mock::destroy_filesystem();
+    }
+
+    // Test load_config with idx != 0
+    {
+        mock::clear_flash();
+
+        assert(load_config(1) == nullptr);
+        assert(load_config(-1) == nullptr);
+
+        config* cfg = static_cast<config*>(load_config());
+        assert(cfg != nullptr);
+
+        constexpr uint32_t num_entries = usable_log_sectors + 2u;
+
+        for (uint32_t i = 0; i < num_entries; i++) {
+            mock::set_timestamp(i * seconds_per_day + 1);
+            memset(cfg->stuff, i % 0x100u, sizeof(cfg->stuff));
+            cfg->tail_id = i;
+
+            assert(save_config(cfg) == 0);
+        }
+
+        config* aux1 = static_cast<config*>(load_config(-1));
+        assert(aux1);
+        assert(aux1 != cfg);
+        assert(aux1->tail_id == num_entries - 2u);
+
+        config* aux = nullptr;
+
+        for (int idx = 1; idx < static_cast<int>(usable_log_sectors); idx++) {
+
+            aux = static_cast<config*>(load_config(-idx));
+            assert(aux == aux1);
+            assert(aux->tail_id == num_entries - 1u - idx);
+
+            aux = static_cast<config*>(load_config(idx));
+            assert(aux == aux1);
+            assert(aux->tail_id == idx + 1u);
+        }
+
+        aux = static_cast<config*>(load_config(-usable_log_sectors));
+        assert(aux == cfg);
+        assert(aux->tail_id == num_entries - 1u);
+
+        aux = static_cast<config*>(load_config(usable_log_sectors));
+        assert(aux == cfg);
+        assert(aux->tail_id == num_entries - 1u);
+
+        aux = static_cast<config*>(load_config(-usable_log_sectors * 0x100000 - 10u));
+        assert(aux == aux1);
+        assert(aux->tail_id == num_entries - 11u);
 
         mock::destroy_filesystem();
     }

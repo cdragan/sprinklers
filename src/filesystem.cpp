@@ -23,6 +23,7 @@ static bool      supports_ota = false;
 static filesystem* fs = nullptr;
 
 static config_base* cfg      = nullptr;
+static config_base* cfg_aux  = nullptr;
 static uint32_t     cfg_addr = ~0u;
 static config_base  cfg_last = { ~0u, ~0u, 0u, 0u };
 
@@ -38,6 +39,11 @@ namespace mock {
         if (cfg) {
             os_free(cfg);
             cfg = nullptr;
+        }
+
+        if (cfg_aux) {
+            os_free(cfg_aux);
+            cfg_aux = nullptr;
         }
 
         flash_size_b = 0u;
@@ -350,11 +356,43 @@ static bool ICACHE_FLASH_ATTR read_config(uint32_t addr, config_base* config)
     return true;
 }
 
-config_base* ICACHE_FLASH_ATTR load_config()
+static config_base* ICACHE_FLASH_ATTR load_config_sector(int idx)
+{
+    const uint32_t num_log_sectors = (log_end - log_begin) / SPI_FLASH_SEC_SIZE;
+
+    int sec_idx = (cfg_addr - log_begin) / SPI_FLASH_SEC_SIZE + idx;
+    sec_idx %= static_cast<int>(num_log_sectors);
+    if (sec_idx < 0)
+        sec_idx += num_log_sectors;
+
+    const uint32_t addr = sec_idx * SPI_FLASH_SEC_SIZE + log_begin;
+
+    if (addr == cfg_addr)
+        return cfg;
+
+    if ( ! cfg_aux)
+        cfg_aux = static_cast<config_base*>(os_malloc(SPI_FLASH_SEC_SIZE));
+
+    if ( ! read_config(addr, cfg_aux))
+        return nullptr;
+
+    return cfg_aux;
+}
+
+config_base* ICACHE_FLASH_ATTR load_config(int idx)
 {
     if (log_begin >= log_end) {
         os_printf("Error: config area not available\n");
         return nullptr;
+    }
+
+    if (idx != 0) {
+        if ( ! cfg) {
+            os_printf("Error: config not initialized\n");
+            return nullptr;
+        }
+
+        return load_config_sector(idx);
     }
 
     if (cfg)

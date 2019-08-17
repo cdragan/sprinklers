@@ -43,14 +43,18 @@ struct zone_settings {
     // that watering occurs every N days, where 0 means disabled,
     // 1 means every day, 2 means every other day, etc.
     bool       dow      : 1;
-    char       name[22];
+    char       name[21];
 };
 
 struct config_settings : public config_base {
     zone_settings zones[6];
 };
 
-enum log_code {
+enum log_code : uint8_t {
+    LOG_INVALID,
+
+    LOG_CONFIG_UPDATE,
+
     LOG_ZONE1_AUTO_START,
     LOG_ZONE2_AUTO_START,
     LOG_ZONE3_AUTO_START,
