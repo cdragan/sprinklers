@@ -315,13 +315,15 @@ int main(int argc, char* argv[])
     static_assert(sizeof(config) == sec_size, "Size of config struct is invalid");
 
     // 4MB flash, 4KB per sector, 1MB for firmware, 128KB for filesystem, 5 sectors for SDK
-    constexpr uint32_t usable_log_sectors = 0x400u - (max_fs_size / sec_size) - 0x100u - 5u;
+    constexpr uint32_t usable_log_sectors = 0x400u - 0x100u - (max_fs_size / sec_size) - 5u;
 
     constexpr uint32_t seconds_per_day = 60u * 60u * 24u;
 
     // Test log saving and loading
     {
         mock::clear_flash();
+
+        assert(usable_log_sectors == get_num_log_sectors());
 
         config* cfg = static_cast<config*>(load_config());
         assert(cfg != nullptr);

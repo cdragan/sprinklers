@@ -356,9 +356,14 @@ static bool ICACHE_FLASH_ATTR read_config(uint32_t addr, config_base* config)
     return true;
 }
 
+uint32_t ICACHE_FLASH_ATTR get_num_log_sectors()
+{
+    return (log_end - log_begin) / SPI_FLASH_SEC_SIZE;
+}
+
 static config_base* ICACHE_FLASH_ATTR load_config_sector(int idx)
 {
-    const uint32_t num_log_sectors = (log_end - log_begin) / SPI_FLASH_SEC_SIZE;
+    const uint32_t num_log_sectors = get_num_log_sectors();
 
     int sec_idx = (cfg_addr - log_begin) / SPI_FLASH_SEC_SIZE + idx;
     sec_idx %= static_cast<int>(num_log_sectors);

@@ -72,6 +72,9 @@ struct config_base
     uint32_t first_timestamp; // first timestamp ever written
 };
 
+// Returns the number of log sectors.
+uint32_t get_num_log_sectors();
+
 // Loads system log/configuration.
 //
 // - idx - offset of the sector from where the current configuration is stored.

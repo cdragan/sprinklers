@@ -32,8 +32,8 @@ struct zone_settings {
     // 'time_min' says how long a zone will be watered, in minutes.
     uint8_t    time_min : 6;
     uint8_t    days     : 7;
-    // 'dow' is days of week.  If true, days is a bitmask saying on which
-    // days watering occurs.  If false, days is just a number saying
+    // 'dow' is days of week.  If true, 'days' is a bitmask saying on which
+    // days watering occurs.  If false, 'days' is just a number saying
     // that watering occurs every N days, where 0 means disabled,
     // 1 means every day, 2 means every other day, etc.
     bool       dow      : 1;
@@ -45,39 +45,21 @@ struct config_settings : public config_base {
     uint16_t      last_log_idx;
 };
 
-enum log_code : uint8_t {
-    LOG_INVALID,
+enum log_code {
+    LOG_ZERO,           // Not a valid log entry
 
-    LOG_CONFIG_UPDATE,
+    LOG_CONFIG_UPDATE,  // No data
+    LOG_AUTO_START,     // Data is zone index
+    LOG_AUTO_END,       // Data is zone index
+    LOG_MANUAL_START,   // Data is zone index
+    LOG_MANUAL_END,     // Data is zone index
+    LOG_BOOT,           // Data is boot_code
+    LOG_MOISTURE,       // Data is moisture sensor reading (percentage)
 
-    LOG_ZONE1_AUTO_START,
-    LOG_ZONE2_AUTO_START,
-    LOG_ZONE3_AUTO_START,
-    LOG_ZONE4_AUTO_START,
-    LOG_ZONE5_AUTO_START,
-    LOG_ZONE6_AUTO_START,
+    LOG_INVALID         // Invalid log entry (this and larger values)
+};
 
-    LOG_ZONE1_AUTO_END,
-    LOG_ZONE2_AUTO_END,
-    LOG_ZONE3_AUTO_END,
-    LOG_ZONE4_AUTO_END,
-    LOG_ZONE5_AUTO_END,
-    LOG_ZONE6_AUTO_END,
-
-    LOG_ZONE1_MANUAL_START,
-    LOG_ZONE2_MANUAL_START,
-    LOG_ZONE3_MANUAL_START,
-    LOG_ZONE4_MANUAL_START,
-    LOG_ZONE5_MANUAL_START,
-    LOG_ZONE6_MANUAL_START,
-
-    LOG_ZONE1_MANUAL_END,
-    LOG_ZONE2_MANUAL_END,
-    LOG_ZONE3_MANUAL_END,
-    LOG_ZONE4_MANUAL_END,
-    LOG_ZONE5_MANUAL_END,
-    LOG_ZONE6_MANUAL_END,
-
+enum boot_code {
     LOG_BOOT_POWER_ON,
     LOG_BOOT_WATCHDOG,
     LOG_BOOT_EXCEPTION,
@@ -87,12 +69,17 @@ enum log_code : uint8_t {
     LOG_BOOT_EXT_RESET
 };
 
+constexpr int log_code_bits = 6;
+
 struct log_entry {
     uint32_t timestamp;
-    log_code event;
+    log_code event : log_code_bits;
+    uint32_t data  : 32 - log_code_bits;
 };
 
-constexpr size_t config_size = 0x1000;
+static_assert(sizeof(log_entry) == 8u, "Invalid size of log_entry");
+
+constexpr size_t config_size = 0x1000u;
 
 struct config : public config_settings {
     log_entry log[(config_size - sizeof(config_settings)) / sizeof(log_entry)];
@@ -104,4 +91,14 @@ static_assert(config_size - sizeof(config) < sizeof(log_entry), "Incorrect confi
 // Logs a specific event.
 //
 // Returns true on success and false on failure.
-bool log_event(log_code event);
+bool log_event(log_code event, uint32_t data = 0u);
+
+// Returns event history.
+//
+// - offset - index of past event at which to start returning history, 1 is the
+//            last logged event, 2 is the event before that, and so on.
+// - buffer - buffer to be filled with past events.
+// - size   - number of entries available in the buffer which can be filled.
+//
+// Returns the number of events actually written to the buffer.
+unsigned get_event_history(unsigned offset, log_entry* buffer, unsigned size);
