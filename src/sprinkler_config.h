@@ -69,7 +69,7 @@ enum boot_code {
     LOG_BOOT_EXT_RESET
 };
 
-constexpr int log_code_bits = 6;
+constexpr int log_code_bits = 4;
 
 struct log_entry {
     uint32_t timestamp;
