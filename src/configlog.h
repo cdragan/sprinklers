@@ -95,8 +95,8 @@ bool log_event(log_code event, uint32_t data = 0u);
 
 // Returns event history.
 //
-// - offset - index of past event at which to start returning history, 1 is the
-//            last logged event, 2 is the event before that, and so on.
+// - offset - index of past event at which to start returning history, 0 is the
+//            last logged event, 1 is the event before that, and so on.
 // - buffer - buffer to be filled with past events.
 // - size   - number of entries available in the buffer which can be filled.
 //

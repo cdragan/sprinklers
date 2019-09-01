@@ -22,19 +22,29 @@ static ICACHE_FLASH_ATTR config* get_config()
 
 bool ICACHE_FLASH_ATTR log_event(log_code event, uint32_t data)
 {
+    if (event <= LOG_ZERO || event >= LOG_INVALID)
+        return false;
+
     config* cfg = get_config();
     if ( ! cfg)
         return false;
 
-    config* next = static_cast<config*>(load_config(1));
-    if ( ! next)
+    const uint32_t timestamp = sntp_get_current_timestamp();
+    if ( ! timestamp)
         return false;
 
     constexpr uint16_t max_log_entries = sizeof(cfg->log) / sizeof(cfg->log[0]);
 
-    os_memcpy(cfg->log, next->log, sizeof(cfg->log));
+    if (cfg->id != ~0u) {
 
-    const uint32_t timestamp = sntp_get_current_timestamp();
+        config* next = static_cast<config*>(load_config(1));
+        if ( ! next)
+            return false;
+
+        os_memcpy(cfg->log, next->log, sizeof(cfg->log));
+
+        cfg->last_log_idx = next->last_log_idx;
+    }
 
     uint16_t idx = cfg->last_log_idx + 1u;
     if (idx >= max_log_entries)
@@ -51,6 +61,9 @@ bool ICACHE_FLASH_ATTR log_event(log_code event, uint32_t data)
 
 unsigned ICACHE_FLASH_ATTR get_event_history(unsigned offset, log_entry* buffer, unsigned size)
 {
+    if ( ! buffer || ! size)
+        return 0u;
+
     const unsigned num_log_sectors = get_num_log_sectors();
 
     config* cfg;
@@ -66,7 +79,9 @@ unsigned ICACHE_FLASH_ATTR get_event_history(unsigned offset, log_entry* buffer,
 
         const unsigned idx = offset + num;
 
-        cfg = static_cast<config*>(load_config(-static_cast<int>(idx)));
+        const unsigned sec_idx = idx % num_log_sectors;
+
+        cfg = static_cast<config*>(load_config(-static_cast<int>(sec_idx)));
 
         if (cfg->last_log_idx >= max_log_entries)
             break;
@@ -76,15 +91,14 @@ unsigned ICACHE_FLASH_ATTR get_event_history(unsigned offset, log_entry* buffer,
         if (log_idx_offs >= max_log_entries)
             break;
 
-        uint16_t log_idx = cfg->last_log_idx - log_idx_offs;
-
-        if (log_idx >= max_log_entries)
-            log_idx = max_log_entries - 1u;
+        const unsigned log_idx = (cfg->last_log_idx >= log_idx_offs)
+                                 ? cfg->last_log_idx - log_idx_offs
+                                 : max_log_entries + cfg->last_log_idx - log_idx_offs;
 
         const auto entry = cfg->log[log_idx];
 
         if (entry.timestamp == ~0u ||
-            entry.event == LOG_ZERO ||
+            entry.event <= LOG_ZERO ||
             entry.event >= LOG_INVALID)
             break;
 
