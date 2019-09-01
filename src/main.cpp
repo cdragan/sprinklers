@@ -8,7 +8,7 @@ extern "C" {
 
 #include "filesystem.h"
 #include "webserver.h"
-#include "sprinkler_config.h"
+#include "configlog.h"
 
 static config* cfg = nullptr;
 

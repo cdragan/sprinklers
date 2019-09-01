@@ -1,5 +1,5 @@
 
-#include "sprinkler_config.h"
+#include "configlog.h"
 
 extern "C" {
 #include "osapi.h"
