@@ -15,7 +15,17 @@ static ICACHE_FLASH_ATTR config* get_config()
     if (cfg->id != ~0u)
         return cfg;
 
-    // TODO init default zone config etc.
+    for (size_t i = 0; i < sizeof(cfg->zones) / sizeof(cfg->zones[0]); i++) {
+        auto& zone = cfg->zones[i];
+
+        zone.order    = static_cast<zone_order>(i + 1);
+        zone.time_min = 0;
+        zone.days     = 0;
+        zone.dow      = false;
+
+        for (size_t j = 0; j < sizeof(zone.name); j++)
+            zone.name[j] = 0;
+    }
 
     return cfg;
 }
