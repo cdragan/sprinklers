@@ -2,6 +2,7 @@
 #include "mock_access.h"
 #include "../src/filesystem.h"
 #include <assert.h>
+#include <stdlib.h>
 #include <string.h>
 
 constexpr uint32_t sec_size = 0x1000u;
