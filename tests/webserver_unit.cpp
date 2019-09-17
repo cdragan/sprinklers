@@ -7,13 +7,13 @@
 #include <string.h>
 
 #define check_response(buffer, expected) do {                    \
-    static const char val[] = (expected);                        \
+    static const char val[] = expected;                          \
     assert((buffer).size() >= sizeof(val) - 1);                  \
     assert(strncmp((buffer).data(), val, sizeof(val) - 1) == 0); \
 } while (0)
 
 #define check_string(buffer, str) do {                                      \
-    static const char val[] = (str);                                        \
+    static const char val[] = str;                                          \
     assert(memmem((buffer).data(), (buffer).size(), val, sizeof(val) - 1)); \
 } while (0)
 
