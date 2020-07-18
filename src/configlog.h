@@ -40,9 +40,22 @@ struct zone_settings {
     char       name[21];
 };
 
+constexpr uint32_t num_zones = 6;
+
 struct config_settings : public config_base {
-    zone_settings zones[6];
+    zone_settings zones[num_zones];
+    // `last_watering` is timestamp of when last auto watering cycle finished.
+    uint32_t      last_watering;
+    // `start_time` is the minute of day at which to start watering.
+    uint16_t      start_time : 11;
+    // `enabled` is a global switch for watering.
+    bool          enabled : 1;
+    // `moisture_enabled` enables or disables moisture monitoring
+    bool          moisture_enabled : 1;
+    // Index of last log entry (for horizontal circular log buffer)
     uint16_t      last_log_idx;
+    // Maximum moisture threshold above which watering is not triggered
+    uint16_t      moisture_threshold;
 };
 
 enum log_code {
@@ -87,6 +100,9 @@ struct config : public config_settings {
 
 static_assert(sizeof(config) <= config_size, "Incorrect config size");
 static_assert(config_size - sizeof(config) < sizeof(log_entry), "Incorrect config size");
+
+// Loads and initializes configuration
+config* get_config();
 
 // Logs a specific event.
 //

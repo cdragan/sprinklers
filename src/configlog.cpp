@@ -6,7 +6,7 @@ extern "C" {
 #include "sntp.h"
 }
 
-static ICACHE_FLASH_ATTR config* get_config()
+config* ICACHE_FLASH_ATTR get_config()
 {
     config* cfg = static_cast<config*>(load_config());
     if ( ! cfg)
@@ -15,7 +15,13 @@ static ICACHE_FLASH_ATTR config* get_config()
     if (cfg->id != ~0u)
         return cfg;
 
-    for (size_t i = 0; i < sizeof(cfg->zones) / sizeof(cfg->zones[0]); i++) {
+    cfg->last_watering      = 0;
+    cfg->start_time         = 0;
+    cfg->enabled            = false;
+    cfg->last_log_idx       = 0xFFFFu;
+    cfg->moisture_threshold = 0xFFFFu;
+
+    for (uint32_t i = 0; i < num_zones; i++) {
         auto& zone = cfg->zones[i];
 
         zone.order    = static_cast<zone_order>(i + 1);

@@ -18,7 +18,6 @@ enum zone_status {
     XZONE_ON
 };
 
-constexpr int      num_zones             = 6;
 static const int   zone_gpios[num_zones] = { 14, 12, 13, 3, 10, 15 };
 static zone_status zones[num_zones]      = { };
 
@@ -53,13 +52,18 @@ static void ICACHE_FLASH_ATTR set_critical_error()
     // TODO turn on red LED to indicate critical error
 }
 
+static void ICACHE_FLASH_ATTR clear_critical_error()
+{
+    // TODO turn off red LED to indicate critical error
+}
+
 // Either turns a specific zone OFF, or turns exactly one zone ON.
 // See README.md for zone assignments and explanation of the behavior of
 // the GPIOs.  Generally HIGH state means that a zone is OFF, which is
 // the default after boot, and LOW state means that a zone is ON.
 static void ICACHE_FLASH_ATTR zone_on_off(int zone, int on)
 {
-    for (int i = 0; i < num_zones; i++) {
+    for (uint32_t i = 0; i < num_zones; i++) {
         if (zones[i] == XZONE_ON && (i != zone || ! on)) {
             os_printf("zone %d off\n", i);
             gpio(zone_gpios[i]).write(hi);
@@ -242,11 +246,65 @@ static HTTPStatus ICACHE_FLASH_ATTR manual(void*             conn,
     return HTTP_OK;
 }
 
+enum how_to_run {
+    RUN_AUTO,
+    RUN_MANUAL
+};
+
+static void ICACHE_FLASH_ATTR select_zone(uint32_t zone_idx, how_to_run how)
+{
+    // TODO
+}
+
 static const handler_entry web_handlers[] = {
     { GET_METHOD,  "sysinfo",   sysinfo   },
     { POST_METHOD, "upload_fs", upload_fs },
     { PUT_METHOD,  "manual",    manual    }
 };
+
+constexpr uint32_t update_interval_s = 10;
+constexpr uint32_t ntp_timeout_s     = 60;
+
+static void ICACHE_FLASH_ATTR update_schedule_from_config(uint32_t timestamp)
+{
+    // TODO
+}
+
+static void ICACHE_FLASH_ATTR update_zones(void*)
+{
+    static uint32_t bad_updates = 0;
+
+    const auto timestamp = sntp_get_current_timestamp();
+
+    if ( ! timestamp) {
+        ++bad_updates;
+        os_printf("Error: no time from SNTP!\n");
+        if (bad_updates * update_interval_s >= ntp_timeout_s)
+            set_critical_error();
+        return;
+    }
+
+    clear_critical_error();
+    bad_updates = 0;
+
+    static bool initial_update = false;
+
+    if (!initial_update) {
+        initial_update = true;
+
+        update_schedule_from_config(timestamp);
+    }
+
+    uint32_t zone_to_run = 0;
+
+    for ( ; zone_to_run < num_zones; zone_to_run++) {
+
+        const auto& zone = cfg->zones[zone_to_run];
+        //TODO
+    }
+
+    select_zone(zone_to_run, RUN_AUTO);
+}
 
 extern "C" void ICACHE_FLASH_ATTR user_init()
 {
@@ -269,7 +327,7 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
     PIN_FUNC_SELECT(PERIPHS_IO_MUX_SD_DATA3_U, FUNC_GPIO10);
     gpio(10).init_output(hi);
 
-    cfg = static_cast<config*>(load_config());
+    cfg = get_config();
 
     if (!cfg) {
         os_printf("Error: failed to read configuration!\n");
@@ -289,15 +347,7 @@ extern "C" void ICACHE_FLASH_ATTR user_init()
 
         static os_timer_t timer;
         os_timer_disarm(&timer);
-        os_timer_setfn(&timer, [](void*) ICACHE_FLASH_ATTR {
-
-                const auto timestamp = sntp_get_current_timestamp();
-                if (timestamp) {
-                    const auto real_time = sntp_get_real_time(timestamp);
-                    os_printf("time: %s", real_time);
-                }
-            },
-            nullptr);
-        os_timer_arm(&timer, 5000, true);
+        os_timer_setfn(&timer, update_zones, nullptr);
+        os_timer_arm(&timer, update_interval_s * 1000, true);
     });
 }
