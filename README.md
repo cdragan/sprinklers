@@ -34,7 +34,7 @@ Electrical connections
 Here is the zone, LED and button assignment on the NodeMCU v1.0 board:
 
                     +----------+
-                    | A0    D0 | GPIO16
+               ADC0 | A0    D0 | GPIO16
                     | RSV   D1 | GPIO5
                     | RSV   D2 | GPIO4
     Zone 5 - GPIO10 | SD3   D3 | GPIO0  - Red LED (error indicator)
@@ -76,6 +76,10 @@ Here is the zone, LED and button assignment on the NodeMCU v1.0 board:
 * GPIOs 5, 4, 0 and 2 are readily available after `gpio_init()`.  The remaining
   GPIOs must be switched to in the MUX to connect them to the output pins, otherwise
   they are routed to other functions.
+* The ADC0 pin can be used for measuring external voltage, e.g. from sensors.
+  It can be used in conjunction with 3v3 and GND output pins as a reference voltage.
+  The ADC0 pin requires input voltage in the range of 0 to 1V, so a voltage divider
+  is required.
 
 
 Physical Interface Design
