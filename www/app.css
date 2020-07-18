@@ -1,0 +1,47 @@
+body {
+    font: 12pt Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+#menu a {
+    border: 3px solid black;
+    border-bottom-width: 0;
+}
+
+div.tab {
+    margin-bottom: 2em;
+    border-bottom: 3px solid black;
+}
+
+.box {
+    border: 1px solid #808080;
+    padding: 0.7em 1em;
+
+    -moz-box-shadow: 5px 5px 5px 0 #C2C2B1;
+    -webkit-box-shadow: 5px 5px 5px 0 #C2C2B1;
+    box-shadow: 5px 5px 5px 0 #C2C2B1;
+}
+
+.shadow {
+    -moz-border-radius: 5px;
+    -webkit-border-radius: 5px;
+    border-radius: 5px;
+}
+
+a.button {
+    background-color: #c1bf21;
+
+    color: #ffffff;
+    font-weight: bold;
+    text-decoration: none;
+}
+
+a.button:hover {
+    background-color: #b1af21;
+}
+
+a.button:active {
+    -moz-box-shadow: 0 0 0 0 white;
+    -webkit-box-shadow: 0 0 0 0 white;
+    box-shadow: 0 0 0 0 white;
+}

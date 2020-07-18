@@ -3,41 +3,99 @@
     <head>
         <meta http-equiv="Content-type" content="text/html;charset=UTF-8" />
         <meta name="description" content="Automated garden watering system" />
+        <meta name="viewport" content="width = device-width" />
         <title>Sprinklers</title>
         <script src="app.js" type="text/javascript"></script>
-        <!--
         <link href="app.css" rel="stylesheet" type="text/css"/>
-        -->
         <link href="favicon.ico" rel="shortcut icon" type="image/x-icon"/>
     </head>
     <body onload="OnPageLoad();">
-        <div id="sysinfo">
+        <div id="menu">
+            <a href="#" id="" onclick="">Main</a>
+            <a href="#" id="" onclick="">Zones</a>
+            <a href="#" id="" onclick="">Schedule</a>
+            <a href="#" id="" onclick="">Config</a>
+            <a href="#" id="" onclick="">Log</a>
+            <a href="#" id="" onclick="">System Info</a>
         </div>
-        <div>
+        <div id="main" class="tab">
+            <div id="status">Status</div>
+            <div id="last">Last Watered</div>
+            <div>
+                <a href="#" id="quick-en-dis" onclick="QuickSysToggle();return false">Enable/Disable</a>
+                <a href="#" id="quick-skip" onclick="QuickSkip();return false">Skip Next Watering</a>
+            </div>
+        </div>
+        <div id="zones" class="tab">
+            <div id="quickbar">
+            </div>
+            <div id="info">
+                <ul>
+                    <li>Status</li>
+                    <li>Last Watered</li>
+                    <li>Next Watering</li>
+                </ul>
+            </div>
+            <div id="z1"></div>
+            <div id="z2"></div>
+            <div id="z3"></div>
+            <div id="z4"></div>
+            <div id="z5"></div>
+            <div id="z6"></div>
             <div>
                 <span id="z1t">Zone 1</span>
-                <a href="#" id="z1" onclick="ToggleZone(1);false"></a>
+                <a href="#" id="z1" onclick="ToggleZone(1);return false"></a>
             </div>
             <div>
                 <span id="z2t">Zone 2</span>
-                <a href="#" id="z2" onclick="ToggleZone(2);false"></a>
+                <a href="#" id="z2" onclick="ToggleZone(2);return false"></a>
             </div>
             <div>
                 <span id="z3t">Zone 3</span>
-                <a href="#" id="z3" onclick="ToggleZone(3);false"></a>
+                <a href="#" id="z3" onclick="ToggleZone(3);return false"></a>
             </div>
             <div>
                 <span id="z4t">Zone 4</span>
-                <a href="#" id="z4" onclick="ToggleZone(4);false"></a>
+                <a href="#" id="z4" onclick="ToggleZone(4);return false"></a>
             </div>
             <div>
                 <span id="z5t">Zone 5</span>
-                <a href="#" id="z5" onclick="ToggleZone(5);false"></a>
+                <a href="#" id="z5" onclick="ToggleZone(5);return false"></a>
             </div>
             <div>
                 <span id="z6t">Zone 6</span>
-                <a href="#" id="z6" onclick="ToggleZone(6);false"></a>
+                <a href="#" id="z6" onclick="ToggleZone(6);return false"></a>
+            </div>
+            <ul>
+                <li>Zone number</li>
+                <li>Zone name (editable)</li>
+                <li>Button to enable/disable zone</li>
+                <li>Reorder zones</li>
+                <li>Watering duration</li>
+            </ul>
+        </div>
+        <div id="schedule" class="tab">
+            <div>
+                <span>Water every <input id="water-every" type="text" name="water-every" value="1"/>
+                days at <input id="water-every-hour" type="text" name="water-every-hour" value="0"/>
+                :<input id="water-every-minute" type="text" name="water-every-minute" value="00"/></span>
+            </div>
+            <div>
+                Specific days of the week.
+            </div>
+            <div>
+                Suspend for N days.
             </div>
         </div>
+        <div id="config" class="tab">
+            <div>Time zone</div>
+            <div>mDNS name</div>
+            <div>NTP server</div>
+        </div>
+        <div id="log" class="tab">
+            <ul><li>Times when each zone was on and for how long</li>
+                <li>Boot times and reasons</li></ul>
+        </div>
+        <div id="sysinfo" class="tab"></div>
     </body>
 </html>

@@ -28,9 +28,9 @@ function DeleteCookie(name)
     SetCookie(name, ";expires=Thu, 01 Jan 1970 00:00:01 GMT");
 }
 
-function Delay(timeout, Func)
+function DelayMs(timeoutMs, Func)
 {
-    window.setTimeout(Func, timeout);
+    window.setTimeout(Func, timeoutMs);
 }
 
 function E(id)
@@ -54,8 +54,6 @@ function E(id)
             }
         },
         setContents: function(contents) { this.elem.innerHTML = contents; },
-/*
-        setHeight: function(height) { this.elem.style.height = height; },
         setAttr: function(name, value) {
             const attr = document.createAttribute(name);
             attr.value = value;
@@ -64,6 +62,15 @@ function E(id)
         setClass: function(value) {
             return this.setAttr("class", value);
         },
+        addButton: function(id, name, func) {
+            const btn = this.insert("a", name);
+            btn.setClass("button box shadow");
+            btn.setAttr("href", "#");
+            btn.setAttr("id", id);
+            btn.elem.onclick = func;
+        },
+/*
+        setHeight: function(height) { this.elem.style.height = height; },
         setStyle: function(value) {
             return this.setAttr("style", value);
         },
@@ -79,21 +86,27 @@ function ConnectionError(method, url, contents, type, Sent)
     // TODO
 }
 
-function Send(method, url, contents, type, Sent)
+// TODO remove this
+function Simulate(url, contents)
 {
+    if (url === "/sysinfo") {
+        return {status: 200, responseText: '{"sdk":"2.1.0(7106d38)","heap_free":47328,"uptime_us":93688371,"reset_reason":0,"timestamp":1561838292,"cur_time":"Sat Jun 29 19:58:12 2019","timezone":1,"wifi_mode":1,"ip":"192.168.1.15","mac":"BC:DD:C2:24:C8:19"}'};
+    }
+    else if (url.startsWith("/manual?")) {
+        return {status: 200};
+    }
+    return {status: 404};
+}
+
+function Send(method, url, contents, type, Sent, retryCount)
+{
+    retryCount = retryCount || 0;
+
     // TODO remove this
-    if (false) {
-        Delay(100, function() {
+    if (/^file:/.test(window.location.href)) {
+        DelayMs(100, function() {
             console.log(url);
-            if (url === "/sysinfo") {
-                Sent({status: 200, responseText: '{"sdk":"2.1.0(7106d38)","heap_free":47328,"uptime_us":93688371,"reset_reason":0,"timestamp":1561838292,"cur_time":"Sat Jun 29 19:58:12 2019","timezone":1,"wifi_mode":1,"ip":"192.168.1.15","mac":"BC:DD:C2:24:C8:19"}'});
-            }
-            else if (url.startsWith("/manual?")) {
-                Sent({status: 200});
-            }
-            else {
-                Sent({status: 404});
-            }
+            Sent(Simulate(url, contents));
         });
         return;
     }
@@ -101,12 +114,15 @@ function Send(method, url, contents, type, Sent)
     const request = new XMLHttpRequest();
     request.onreadystatechange = function() {
         if (request.readyState === 4) {
-            if (request.status === 0 || request.status === 408) {
-                ConnectionError(method, url, contents, type, Sent);
-            }
-            else {
+            if (request.status === 200)
                 Sent(request);
+            else if (retryCount < 10) {
+                DelayMs(1000, function() {
+                    Send(method, url, contents, type, Sent, retryCount + 1);
+                });
             }
+            else
+                ConnectionError(method, url, contents, type, Sent);
         }
     };
     request.open(method, url, true);
@@ -121,6 +137,14 @@ function Send(method, url, contents, type, Sent)
 
 function OnPageLoad()
 {
+    E("quickbar").addButton("togauto", "Start Full Cycle", ToggleAuto);
+    for (let iz = 0; iz < 6; iz++) {
+        const z = E("z" + (iz + 1));
+        const m = zone_map[iz];
+        const e = z.insert("span", m.name);
+        const b = z.addButton("togz" + iz, "Start");
+    }
+
     SetZone();
 
     const table = E("sysinfo").insert("table");
@@ -148,11 +172,105 @@ function OnPageLoad()
     });
 }
 
+/*
+ * - Timer, every 30s query status from device
+ *
+ * - Button [Start full cycle] (automatic)
+ *   * Interrupts any manual cycle
+ *
+ * - For each zone, tile with:
+ *   * Name of the zone (grayed out "zone #")
+ *   * Button (for zones which are not set up: just a box)
+ *   * Time it takes to water the zone
+ *   * Button to enable or disable a zone
+ *
+ * - Button [Configure]
+ *   * Rename zones
+ *   * Change zone times
+ *   * Reorder zones (up or down)
+ *
+ * During a full/automatic cycle, started with button or started automatically:
+ *   - Info that watering is going on
+ *   - Current zone buttons: [Skip]
+ *   - Previous zones grayed out (not clickable)
+ *   - Next zones colored to indicate they are ready (not clickable)
+ *   - Show elapsed/remaining time for each zone
+ *
+ * In manual mode (if automatic cycle not running):
+ *   - Manual button for each zone: [Start] or [Stop]
+ *   - Show [Configure] button
+ *   - In manual mode, if a zone is started, it will automatically
+ *     turn off when its normal configured time runs out.
+ *
+ */
+
+// Checks whether the zone number is correct
+function ZoneOK(zone)
+{
+    return typeof zone === "number" &&
+           zone >= 1 && zone <= 6;
+}
+
+// Checks whether the zone number is correct and whether that zone is enabled
+function ZoneEnabled(zone)
+{
+    return ZoneOK(zone) && zones[zone - 1] >= 0;
+}
+
+// Sets local zone state and updates UI
+// 0 means no zone enabled, 1-6 means enable only that zone
+function SetZone(id)
+{
+    for (let i = 0; i < zones.length; i++) {
+        if (zones[i] >= 0)
+            zones[i] = (i == id - 1) ? 1 : 0;
+        // TODO update UI
+    }
+}
+
+// Stop zone on the device
+function StopZone(zone)
+{
+    SetZone(0);
+
+    Send("PUT", "/manual", "{\"zone\":" + zone + ",\"state\":0}", null, function(request) {
+        if (request.status === 200) {
+            console.log(zone + " " + state);
+            SetZone(zone, state);
+        }
+        else {
+            // TODO report error
+        }
+    });
+}
+
+// Starts automatic watering cycle
+function ToggleAuto()
+{
+    StopZone(0);
+    // 1. Stop any manual zones
+    // 2. Send trigger to device
+    // 3. Update UI
+}
+
+// Starts zone configuration
+function ConfigZones()
+{
+}
+
+// Starts, stops or skips (depending on mode/state)
+function ZoneAction(zone)
+{
+}
+
+// Enables or disables a zone
 function ToggleZone(zone)
 {
-    if (typeof zone !== "number") return;
-    if (zone < 1 || zone > 6) return;
-    if (zones[zone - 1] < 0) return;
+}
+
+function ToggleZoneOLD(zone)
+{
+    if (!ZoneEnabled(zone)) return;
 
     const state = zones[zone - 1] ? 0 : 1;
 
