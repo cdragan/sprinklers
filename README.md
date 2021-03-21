@@ -1,3 +1,5 @@
+[![Build Status](https://github.com/cdragan/sprinklers/workflows/CI/badge.svg)](https://github.com/cdragan/sprinklers/actions)
+
 Introduction
 ============
 
