@@ -1,13 +1,11 @@
-PLATFORMIO = ~/.platformio/penv/bin
-
 build:
-	$(PLATFORMIO)/platformio run
+	platformio run
 
 upload:
-	$(PLATFORMIO)/platformio run --target upload
+	platformio run --target upload
 
 monitor:
-	$(PLATFORMIO)/pio device monitor --port /dev/cu.SLAB_USBtoUART --baud 74880
+	pio device monitor --port /dev/cu.SLAB_USBtoUART --baud 74880
 
 upload_and_monitor: upload
 	@$(MAKE) monitor
