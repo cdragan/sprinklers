@@ -125,11 +125,19 @@ Installing the software
 
 2. Install [PlatformIO](https://platformio.org) and framework-esp8266-nonos-sdk.
 
+    * On MacOS
+
+            brew install platformio
+
+    * On Ubuntu
+
+            pip install --upgrade platformio
+
 3. Compile the firmware:
 
         make
 
-4. Connect ESP8266 over USB, then flash the firware:
+4. Connect ESP8266 over USB, then flash the firmware:
 
         make upload
 
@@ -138,8 +146,7 @@ Installing the software
 
         make upload_fs ip=sprinklers.local
 
-The GNU Makefile is set up for Mac, but probably few tweaks are needed to make
-it work on Linux or Windows.  Check out the extra targets inside the Makefile.
+Also check out the extra targets inside the Makefile.
 
 
 Web UI Design
