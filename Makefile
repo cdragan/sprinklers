@@ -1,8 +1,8 @@
 build:
-	platformio run
+	pio run
 
 upload:
-	platformio run --target upload
+	pio run --target upload
 
 monitor:
 	pio device monitor --port /dev/cu.SLAB_USBtoUART --baud 74880
